@@ -150,6 +150,13 @@ class Gateway {
     return n.slow ? 'slow' : 'up';
   }
 
+  // Membership as the gateway sees it, sent with every probe so nodes keep per-peer state in gateway mode.
+  peersOf(node) {
+    const peers = {};
+    for (const n of this.nodes.values()) if (n !== node) peers[n.nodeId] = this.nodeStatus(n);
+    return peers;
+  }
+
   // farzad's heartbeat state: a planned restart or leave is not a failure, so it must not raise node-down.
   applyState(node, state) {
     if (state === 'restarting') {
@@ -395,7 +402,7 @@ class Gateway {
     fetch(this.url(node.heartbeatUrl), {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-nodelink-gateway': 'pisak' },
-      body: JSON.stringify({ from: 'gateway', seq: ++node.probeSeq, ts: Date.now(), state: 'up' }),
+      body: JSON.stringify({ from: 'gateway', seq: ++node.probeSeq, ts: Date.now(), state: 'up', peers: this.peersOf(node) }),
       redirect: 'manual', // a 3xx is not res.ok, so it counts as a failed probe
       signal: AbortSignal.timeout(timeout),
     })

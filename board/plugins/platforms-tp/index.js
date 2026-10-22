@@ -173,6 +173,10 @@ async function loopbackApi(pathname, method = 'GET', body, query = {}) {
     throw new GatewayAdminError(`Upstream API returned an unexpected redirect (HTTP ${response.status}).`);
   }
 
+  if (response.status >= 300 && response.status < 400) {
+    throw new GatewayAdminError(`Gateway admin returned an unexpected redirect (HTTP ${response.status}).`);
+  }
+
   let result;
   try {
     result = await response.json();

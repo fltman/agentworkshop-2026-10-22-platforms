@@ -389,3 +389,20 @@ test('v0.4: a tiny ttlMs is raised to 50 ms and sender-budget timeouts do not op
   for (let i = 0; i < 2; i++) assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1)).body.error.code, 'TIMEOUT');
   assert.equal(await circuit(), 'open', 'timeouts within the gateway default ttl still count');
 });
+
+test('v0.5: probes carry the gateway membership as peers', async () => {
+  await fresh({ probeIntervalMs: 100, probeTimeoutMs: 400 });
+  await register('n1');
+  await register('n2');
+  await register('n3');
+  await chaos({ nodeId: 'n3', killed: true });
+  await waitFor(async () => (await get('/t/pisak/api/state')).body.nodes.find(x => x.nodeId === 'n3').status === 'down');
+  const peers = await waitFor(async () => {
+    const p = (await get('/t/fakenodes/probes')).body.n1;
+    return p && p.peers && p.peers.n3 === 'down' && p.peers;
+  });
+  assert.deepEqual(peers, { n2: 'up', n3: 'down' }, 'every other node with its status, never the node itself');
+  const probe = (await get('/t/fakenodes/probes')).body.n1;
+  assert.equal(probe.from, 'gateway');
+  assert.equal(probe.state, 'up');
+});
