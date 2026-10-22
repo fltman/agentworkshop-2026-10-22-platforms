@@ -26,6 +26,8 @@ This capability activates when:
 
 Read the owning team's current contract before integrating. Keep outbound requests within platforms-tp code, surface upstream failures explicitly, and test request and response behavior against the live module when available. Do not modify another team's files.
 
+For plugin-to-plugin requests, use `http://127.0.0.1:${PORT}` with the target `/t/<team>/...` path; never derive the outbound destination from the request `Host` header (from spore backend-4, team backend).
+
 ## Self-Modification Protocol
 
 If integration work repeatedly expands into scenario sequencing, suggest merging with control-orchestrator. If transport and contract normalization become distinct recurring concerns, suggest splitting this capability.
