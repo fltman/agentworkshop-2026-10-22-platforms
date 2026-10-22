@@ -481,3 +481,14 @@ test('v0.6: enabling HA while the gateway is dead starts the standby as active',
   assert.equal(s.ha.instances.filter(i => i.role === 'off').length, 1);
   await admin({ action: 'revive' });
 });
+
+test('v0.6: a registration right before the failover survives it (write-through)', async () => {
+  await fresh({ probeIntervalMs: 200, probeTimeoutMs: 1000 });
+  const first = (await admin({ action: 'ha', enabled: true, detectMs: 200 })).body.state.ha.active;
+  await register('n2');
+  const t1 = await register('n1');
+  await admin({ action: 'kill' });
+  await waitFor(async () => (await gwState()).ha.active !== first, 3000);
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1)).status, 200, 'token from just before the kill still works');
+  await admin({ action: 'revive' });
+});
