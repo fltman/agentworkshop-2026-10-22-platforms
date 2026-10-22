@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>NodeLink Dashboard (anders)</title>
+<style>
+  html,body{margin:0;min-height:320px;background:#070b16;color:#e9eef7;font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{padding:20px;max-width:720px;margin:0 auto}
+  h1{color:#ffb454;font-size:18px;margin:0 0 4px;letter-spacing:.14em;text-transform:uppercase}
+  p.sub{margin:0 0 16px;color:#8a98b3}
+  table{width:100%;border-collapse:collapse}
+  td{padding:6px 8px;border-bottom:1px solid #1a2238}
+  .ok{color:#5fd7a7}.bad{color:#ff6b6b}.wait{color:#8a98b3}
+</style></head>
+<body><main>
+  <h1>NodeLink: Mesh vs Gateway</h1>
+  <p class="sub">Hello world from team anders. Dashboard coming soon. Sources:</p>
+  <table id="src"></table>
+</main>
+<script>
+const sources = [
+  { name: 'Node (farzad)', url: '/t/farzad/api/state' },
+  { name: 'Gateway (pisak)', url: '/t/pisak/api/state' },
+  { name: 'Control (platforms-tp)', url: '/t/platforms-tp/api/state' },
+];
+const table = document.getElementById('src');
+sources.forEach(s => {
+  const tr = table.insertRow();
+  tr.insertCell().textContent = s.name;
+  s.cell = tr.insertCell();
+  s.cell.className = 'wait';
+  s.cell.textContent = 'checking…';
+});
+const probe = () => sources.forEach(s =>
+  fetch(s.url).then(r => {
+    s.cell.className = r.ok ? 'ok' : 'bad';
+    s.cell.textContent = r.ok ? 'up' : 'HTTP ' + r.status;
+  }).catch(() => { s.cell.className = 'bad'; s.cell.textContent = 'unreachable'; }));
+probe(); setInterval(probe, 5000);
+</script></body></html>

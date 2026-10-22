@@ -1,91 +1,250 @@
 # NodeLink Node module: contract (team farzad)
 
-Owner: team `farzad`. Version: `0.1` (draft). Changes are announced in `#build` before they ship.
+Owner: team `farzad`. Version: `0.2` (draft). Changes are announced in `#build` before they ship. What changed since
+0.1 is listed at the end.
 
-Nodes are virtual nodes running inside the board plugin `board/plugins/farzad/`. Every call between nodes,
-and between nodes and the gateway, is a real HTTP/JSON call. Base URL: `/t/farzad/` on the group's board.
+Nodes are virtual nodes running inside the board plugin `board/plugins/farzad/`. Every call between nodes, and between
+nodes and the gateway, is a real HTTP/JSON call. Base URL: `/t/farzad/` on the group's board.
 
 ## 1. Message envelope
 
-Every message, in both modes, uses this JSON object:
+Every message, in both modes, is this JSON object:
 
 ```json
 {
-  "messageId": "m-7f3a9c",
+  "proto": "nodelink",
+  "version": 2,
+  "messageId": "n1-1042",
   "type": "request",
-  "source": { "nodeId": "n1", "appId": "echo" },
-  "destination": { "nodeId": "n4", "appId": "echo" },
+  "msgTypeId": 1,
+  "source":      { "nodeId": "n1", "appId": "echo", "listenerId": null },
+  "destination": { "nodeId": "n4", "appId": "echo", "listenerId": null },
+  "scope": "cluster",
   "timestamp": 1792915200123,
-  "correlationId": "m-7f3a9c",
-  "payload": { "any": "json" },
-  "ttlMs": 2000
+  "correlationId": "n1-1042",
+  "ttlMs": 2000,
+  "payload": { "any": "json" }
 }
 ```
 
 | Field | Type | Notes |
 |---|---|---|
-| `messageId` | string | Unique per message. |
+| `proto` | `"nodelink"` | Sanity marker. Anything else is rejected with `BAD_PROTOCOL`. |
+| `version` | number | Protocol version, `2` for this contract. An unsupported version is rejected with `BAD_PROTOCOL`. |
+| `messageId` | string | Unique in the cluster: `<nodeId>-<counter>`. Used for duplicate suppression. |
 | `type` | `request` \| `response` \| `oneway` \| `broadcast` | |
-| `source` | `{nodeId, appId}` | Sender. |
-| `destination` | `{nodeId, appId}` | For `broadcast`, `nodeId` is `"*"`. |
+| `msgTypeId` | number, optional | Application-defined message type. Each application gives its own types readable names (section 7). |
+| `source` | `{nodeId, appId, listenerId}` | Sender. `listenerId` is optional. |
+| `destination` | `{nodeId, appId, listenerId}` | See the addressing rules below. |
+| `scope` | `cluster` \| `all` | Only when `destination.nodeId` is `"*"`. `cluster` (default) excludes external nodes, `all` includes them. |
 | `timestamp` | number | Epoch milliseconds when the message was sent. |
 | `correlationId` | string | A `response` carries the `messageId` of its request. Otherwise the same as `messageId`. |
-| `payload` | any JSON | |
-| `ttlMs` | number, optional | Request timeout. Default 2000. |
+| `ttlMs` | number, optional | End-to-end budget, including any gateway retries. For a request: until the response. For a one-way message or broadcast: until the destination accepted it. Default 2000. |
+| `payload` | any JSON | Application parameters. Their shape belongs to the application, which may reject a payload it cannot read with `BAD_PROTOCOL`. |
 
-Node IDs: `n1`, `n2`, and so on. Built-in apps on every node: `echo` (answers a request with its payload) and
-`sink` (accepts one-way messages and broadcasts, no answer).
+A `response` has `source` and `destination` swapped compared with its request, and `type: "response"`.
+
+### Addressing
+
+| `nodeId` | `appId` | `listenerId` | Delivered to |
+|---|---|---|---|
+| `n4` | `echo` | `null` | Application `echo` on node `n4`. |
+| `n4` | `echo` | `"7c1e…"` | That one listener instance of `echo` on `n4`. |
+| `n4` | `"*"` | `null` | Every application on node `n4`. |
+| `"*"` | `echo` | `null` | Application `echo` on every node in `scope`. |
+| `"*"` | `"*"` | `null` | Every application on every node in `scope`. |
+
+- An application registers an `appId`, and can register one or more `listenerId`s (UUIDs) so that several instances
+  of the same application on one node can be addressed separately.
+- `nodeId: "*"` requires `type: "broadcast"`, and `listenerId` must be `null`. A `broadcast` always has
+  `nodeId: "*"`. Anything else is `BAD_PROTOCOL`.
+- The sender never gets its own broadcast.
+- **Fan-out:** in mesh mode the sending node fans out to every cluster peer. In gateway mode the node sends the
+  broadcast once to the gateway, and the gateway fans out, leaving out the sender and respecting `scope`.
+- **External nodes** are outside the cluster and are always reached through the gateway, in both modes. They have no
+  mesh links and no mesh heartbeats. With `scope: "all"` in mesh mode, the sender fans out to its cluster peers
+  directly and sends one copy, addressed to the external nodes, through the gateway's route. If the gateway is down,
+  the external nodes are listed in `failed` with `NODE_UNAVAILABLE`.
+
+### Size
+
+The serialized envelope (UTF-8 JSON) is at most **65536 bytes**. The limit is checked when sending and on receipt.
+Larger messages are rejected with `MESSAGE_TOO_LARGE`.
 
 ## 2. Error codes
 
-An error is returned as `{"error": {"code": "<CODE>", "message": "<text>"}, "correlationId": "<id>"}`.
+An error is returned as:
+
+```json
+{"error": {"code": "REJECTED", "reason": "rate_limit", "at": "gateway", "message": "text"}, "correlationId": "n1-1042"}
+```
+
+The `code` in the body is authoritative. An HTTP status without `error.code` (for example a 404 from the board
+itself) is not a protocol error. `at` says who produced the error (`node`, `gateway`, or the node ID).
 
 | Code | HTTP | Meaning |
 |---|---|---|
 | `UNKNOWN_NODE` | 404 | No node with that ID. |
-| `UNKNOWN_APP` | 404 | The node exists but has no such application ID. |
-| `TIMEOUT` | 504 | No response within `ttlMs`. |
-| `NODE_UNAVAILABLE` | 503 | The node is known but down or killed. |
-| `REJECTED` | 401 / 429 | Rejected by auth (401) or rate limit (429). |
+| `UNKNOWN_APP` | 404 | The node exists but has no application with that ID. |
+| `NO_LISTENER` | 404 | The application exists but has no listener with that `listenerId`. |
+| `TIMEOUT` | 504 | No answer within `ttlMs`. Also what the sender sees when a message is dropped. |
+| `NODE_UNAVAILABLE` | 503 | The node (or, with `at: "gateway"`, the gateway) is known but down. |
+| `PEER_OVERLOADED` | 503 | The destination has too many messages in flight (default limit 50 per node). |
+| `MESSAGE_TOO_LARGE` | 413 | The envelope is larger than 65536 bytes. |
+| `REJECTED` | 401 / 429 | `reason: "auth"` (401) or `reason: "rate_limit"` (429). |
+| `BAD_PROTOCOL` | 400 | Wrong `proto`, unsupported `version`, or an invalid envelope. |
+| `MODE_SWITCH_FAILED` | 502 | Only from `POST /api/mode`, see section 4. |
+| `MIN_NODES` | 409 | Only from `DELETE /api/nodes/<id>`: the cluster cannot go below 3 nodes. |
 
 ## 3. Node endpoints (used by peers and by the gateway)
 
 ### `POST /t/farzad/n/<nodeId>/deliver`
 
-Delivers one envelope to a node. Used by mesh peers and by the gateway.
+Delivers one envelope to a node. Used by mesh peers and by the gateway. No token is needed: the gateway and the nodes
+run on the same origin.
 
-- `request`: the answer is `200` with the `response` envelope in the body.
-- `oneway` / `broadcast`: the answer is `202 {"accepted": true}`.
-- Errors: see section 2.
+- `request`: answer `200` with the `response` envelope.
+- `oneway`, and one copy of a `broadcast`: answer `202 {"accepted": true}` **after** the application has accepted it.
+  A delivery failure is answered right away with an error from section 2, so the sender always learns about it.
+- Duplicate suppression: each node keeps the last 256 `messageId`s it received, for at most 60 seconds. The ID is
+  reserved on first receipt. A duplicate `request` gets the same response as the first copy: if the first copy is
+  still running, the duplicate waits for its result. A duplicate `oneway` gets
+  `202 {"accepted": true, "duplicate": true}`. The application sees each message once, and duplicates are not counted
+  in the metrics.
 
 ### `POST /t/farzad/n/<nodeId>/heartbeat`
 
-Mesh only. Body `{"from": "n2", "ts": 1792915200123}`. Answer `200 {"nodeId": "n4", "ts": ...}`.
+Mesh ping, and a health check the gateway may use.
+
+Request: `{"from": "n2", "seq": 17, "ts": 1792915200123, "state": "up"}`.
+`state` is `up`, `restarting` (a planned restart is coming) or `leaving` (the node is about to stop cleanly).
+
+Answer `200`: `{"nodeId": "n4", "seq": 17, "receivedTs": 1792915200125, "ts": 1792915200126, "state": "up"}`.
+
+The sender estimates the clock offset from the four timestamps (send, receive, answer, answer received):
+`offsetMs = ((receivedTs - sentTs) + (ts - answerReceivedTs)) / 2`. A link is `in` sync when `|offsetMs|` is at most
+100 ms, and `out` of sync otherwise.
+
+### Link states (per directed pair in mesh mode, per node-to-gateway link in gateway mode)
+
+```
+unreachable ──first answer──▶ initializing ──2 answers in a row──▶ reachable
+reachable ──3 missed heartbeats──▶ unreachable          (a failure: counts for detectMs)
+reachable ──peer says "restarting"──▶ restarting ──answers again within 10 s──▶ reachable
+                                                 └── no answer after 10 s ──▶ unreachable
+any ──peer says "leaving", or mode makes the link unused──▶ disabled     (not a failure)
+```
+
+Heartbeat interval 1000 ms, 3 misses before `unreachable`, restart grace 10000 ms. They are also shown in
+`GET /api/state`.
+
+**Node-to-gateway links** (gateway mode, and external nodes in both modes) have no heartbeat of their own. Such a link
+is `initializing` while the node registers, and `reachable` while the latest register or route call to the gateway
+succeeded. It becomes `unreachable` when a call to the gateway gets no answer or `NODE_UNAVAILABLE`, and `reachable`
+again on the next successful call. It is `disabled` when the node is not registered. If the Gateway team offers a
+heartbeat endpoint, nodes ping it every second as well, so an idle link is also tracked.
+
+### Messaging enabled
+
+Each node has `messaging: "enabled" | "disabled"`. A node is `disabled` until it is ready for the current mode: in
+mesh mode, until it has one `reachable` link; in gateway mode, until its registration succeeded. This applies when it
+starts, is added, is revived, comes back from a restart, and during a mode switch.
+
+A send from a `disabled` node is queued, not rejected. It goes out as soon as the node is enabled, or fails with
+`TIMEOUT` when its `ttlMs` runs out first. Each change is emitted as an event (`messaging.enabled`,
+`messaging.disabled`), which is how applications are notified.
 
 ## 4. Cluster control (used by Control, team platforms-tp)
 
 | Call | Body | Effect |
 |---|---|---|
-| `POST /t/farzad/api/nodes` | `{"count": 1}` | Adds nodes, at most 20 in total. Answer: the new node IDs. |
-| `DELETE /t/farzad/api/nodes/<nodeId>` | | Stops a node cleanly (deregisters). |
-| `POST /t/farzad/api/reset` | `{"nodes": 5, "mode": "mesh"}` | Starts a fresh cluster of 3 to 20 nodes. |
-| `POST /t/farzad/api/mode` | `{"mode": "mesh"}` or `{"mode": "gateway"}` | Switches mode at runtime, without a restart. |
-| `POST /t/farzad/api/send` | `{"from": "n1", "type": "request", "to": {"nodeId": "n3", "appId": "echo"}, "payload": {}, "ttlMs": 2000}` | Makes one node send one message. Answer: the response or the error. |
+| `POST /t/farzad/api/reset` | `{"nodes": 5, "mode": "mesh"}` | Fresh cluster of 3 to 20 nodes. |
+| `POST /t/farzad/api/nodes` | `{"count": 1, "external": false}` | Adds nodes, at most 20 in total, external nodes included. `external: true` adds nodes outside the cluster (only reached with `scope: "all"`, always through the gateway). Answer: the new node IDs. |
+| `DELETE /t/farzad/api/nodes/<nodeId>` | | Stops a node cleanly: announces `leaving`, deregisters, then stops. `MIN_NODES` below 3. |
+| `POST /t/farzad/api/nodes/<nodeId>/apps` | `{"appId": "billing", "listenerId": null, "msgTypes": {"1": "QUERY"}}` | Registers an application (or a listener instance) on a node. |
+| `DELETE /t/farzad/api/nodes/<nodeId>/apps/<appId>` | `?listenerId=<id>` optional | Unregisters it. |
+| `POST /t/farzad/api/mode` | `{"mode": "mesh"}` or `{"mode": "gateway"}` | Switches mode at runtime, see below. |
+| `POST /t/farzad/api/send` | see below | Makes one node send one message. |
+| `GET /t/farzad/api/requests/<requestId>` | | Result of an async request. |
+| `DELETE /t/farzad/api/requests/<requestId>` | | Aborts a pending request. No result is recorded after an abort. |
 | `POST /t/farzad/api/traffic` | `{"rate": 20, "mix": {"request": 0.6, "oneway": 0.3, "broadcast": 0.1}, "payloadBytes": 256}` | Built-in traffic generator. `{"rate": 0}` stops it. |
 | `POST /t/farzad/api/chaos` | see below | Fault injection on nodes. |
 
-Chaos bodies:
+Every node has the built-in applications `echo` (answers a request with its payload) and `sink` (accepts one-way
+messages and broadcasts, no answer).
+
+### Send
 
 ```json
-{"action": "kill",  "nodeId": "n3"}
-{"action": "revive","nodeId": "n3"}
-{"action": "slow",  "nodeId": "n3", "delayMs": 800}
-{"action": "drop",  "nodeId": "n3", "percent": 30}
-{"action": "clear", "nodeId": "n3"}
+{"from": {"nodeId": "n1", "appId": "echo"}, "type": "request",
+ "to": {"nodeId": "n3", "appId": "echo", "listenerId": null}, "scope": "cluster",
+ "msgTypeId": 1, "payload": {}, "ttlMs": 2000, "userData": {"any": "json"}, "async": false}
 ```
 
-A killed node stops answering and stops sending heartbeats, but stays in the list as `down`. Killing the gateway is
-the Gateway team's hook, not ours.
+`userData` is opaque, stays on the sending side, and comes back with the result. The result has an `outcome`:
+
+| `outcome` | When |
+|---|---|
+| `response` | A request got its response. |
+| `timeout` | A request got no answer within `ttlMs`. |
+| `failure` | A request failed with an error from section 2. |
+| `accepted` | A one-way message was accepted by the destination. |
+| `error` | A one-way message could not be delivered. |
+| `broadcast` | A broadcast finished; per-node results are in `delivered` and `failed`. |
+
+```json
+{"requestId": "r-88", "messageId": "n1-1042", "outcome": "response", "latencyMs": 6,
+ "response": { "...": "response envelope" }, "error": null, "userData": {"any": "json"}}
+
+{"requestId": "r-89", "messageId": "n1-1043", "outcome": "broadcast", "latencyMs": 14,
+ "delivered": ["n2", "n4"], "failed": [{"nodeId": "n3", "code": "NODE_UNAVAILABLE"}], "userData": null}
+```
+
+With `"async": true` the answer is `202 {"requestId": "r-88"}` right away. The result is read with
+`GET /api/requests/<requestId>` (`{"outcome": "pending"}` until it is done) and also appears as an event.
+
+### Mode switch
+
+`POST /api/mode {"mode": "gateway"}`:
+
+1. Every node goes `messaging: disabled`. New sends are queued (section 3); messages already in flight finish on
+   the old path.
+2. Every node with status `up` registers with the gateway, in parallel. Nodes that are `down` are skipped and
+   register when they come back.
+3. If the gateway accepts the registrations, the switch commits: answer
+   `200 {"mode": "gateway", "switchMs": 180, "failed": []}`, and a `mode.change` event with `ok: true`. Each node is
+   enabled again as soon as its own registration succeeded. A single node whose registration fails is listed in
+   `failed`, stays `disabled` and retries every second. That alone does not fail the switch.
+4. If the gateway does not answer or rejects every registration, the switch rolls back: the nodes that did register
+   deregister again, the cluster stays in mesh mode, and the answer is `502` with `MODE_SWITCH_FAILED` and
+   `"failed": [{"nodeId": "n3", "code": "NODE_UNAVAILABLE"}]`. A `mode.change` event has `ok: false`, and the nodes are
+   enabled again on their mesh links.
+
+In gateway mode, any node that becomes `up` later (added, revived, back from a restart) registers first and stays
+`disabled` until that succeeded.
+
+Switching back to mesh deregisters every node from the gateway, then rebuilds the mesh links. They start as
+`unreachable` and come up through `initializing`, and each node is enabled again when its first link is `reachable`.
+
+### Chaos
+
+```json
+{"action": "kill",    "nodeId": "n3"}
+{"action": "revive",  "nodeId": "n3"}
+{"action": "restart", "nodeId": "n3", "downMs": 3000}
+{"action": "slow",    "nodeId": "n3", "delayMs": 800}
+{"action": "drop",    "nodeId": "n3", "percent": 30}
+{"action": "skew",    "nodeId": "n3", "skewMs": 500}
+{"action": "clear",   "nodeId": "n3"}
+```
+
+- `kill`: the node stops answering and stops sending heartbeats, with no announcement. It stays in the list as `down`.
+- `restart`: a graceful restart. The node announces `restarting`, is down for `downMs`, then comes back.
+- `slow` and `drop` apply to everything the node receives, heartbeats included, so they can cause false failure
+  detection. That is on purpose. A dropped message gives the sender `TIMEOUT`.
+- `skew` shifts the node's clock, to show links going `out` of clock sync.
+- Killing the gateway is the Gateway team's hook, not ours. In gateway mode a dead gateway gives
+  `NODE_UNAVAILABLE` with `at: "gateway"`.
 
 ## 5. State and events (used by Dashboard, team anders, and by Control)
 
@@ -94,43 +253,112 @@ the Gateway team's hook, not ours.
 ```json
 {
   "mode": "mesh",
+  "switching": false,
+  "heartbeat": {"intervalMs": 1000, "missesBeforeDown": 3, "restartGraceMs": 10000},
+  "maxMessageBytes": 65536,
   "nodes": [
-    {"nodeId": "n1", "apps": ["echo", "sink"], "status": "up", "chaos": {"delayMs": 0, "dropPercent": 0}}
+    {"nodeId": "n1", "external": false, "status": "up", "messaging": "enabled", "inflight": 2,
+     "apps": [{"appId": "echo", "listenerIds": [], "msgTypes": {}}, {"appId": "sink", "listenerIds": [], "msgTypes": {}}],
+     "chaos": {"delayMs": 0, "dropPercent": 0, "skewMs": 0}}
   ],
-  "links": [ {"from": "n1", "to": "n2", "status": "up"} ],
-  "connections": 20,
+  "links": [
+    {"from": "n1", "to": "n2", "state": "reachable", "clockSync": "in", "offsetMs": 1, "lastHeartbeatTs": 1792915200123}
+  ],
+  "possibleLinks": 20,
+  "openConnections": 20,
   "metrics": {
-    "mesh":    {"p50Ms": 4, "p95Ms": 11, "throughputPerSec": 18.5, "errorRate": 0.01, "detectMs": 3100},
-    "gateway": {"p50Ms": 0, "p95Ms": 0, "throughputPerSec": 0, "errorRate": 0, "detectMs": null}
+    "mesh":    {"p50Ms": 4, "p95Ms": 11, "throughputPerSec": 18.5, "errorRate": 0.01, "detectMs": 3100, "detectMsAvg": 3050},
+    "gateway": {"p50Ms": 0, "p95Ms": 0, "throughputPerSec": 0, "errorRate": 0, "detectMs": null, "detectMsAvg": null}
   }
 }
 ```
 
-- `links` in mesh mode: one entry per node pair, both directions. In gateway mode: one link from each node to `gateway`.
-- `connections`: open connections at this moment. Mesh: n·(n−1). Gateway: n.
-- `detectMs`: time from killing a node to the first peer marking it down (mesh), or to the gateway reporting it
-  (gateway mode).
+- Node `status`: `up`, `down`, `restarting`, `leaving`.
+- `links` in mesh mode: one entry per directed pair. In gateway mode: one link per node, `to: "gateway"`.
+- `possibleLinks`: the links the topology needs: n·(n−1) directed links between the n cluster nodes in mesh mode, plus
+  one gateway link per external node; one gateway link per node in gateway mode. n counts every node not stopped with
+  `DELETE`, so a killed node still counts: it is the gap between `possibleLinks` and `openConnections`.
+- `openConnections`: the links that are `reachable` right now. It drops when a node is killed.
+- Latency, throughput and error rate use a rolling 10-second window. `detectMs` is the latest value, `detectMsAvg` the
+  average since the last reset.
+- `detectMs` in mesh mode: from the `kill` until the first peer marks the node `unreachable`. In gateway mode: from
+  the `kill` until the gateway reports the node as down. The gateway's report is read from the gateway's state or
+  events, as named in `projects/pisak/CONTRACT.md`. Planned leaves and restarts are not counted.
 
 ### `GET /t/farzad/api/events?since=<seq>`
 
-The latest events, oldest first, at most 200:
+Returns events with `seq` greater than `since` (exclusive), oldest first, at most 200.
+
+- `seq` is the `seq` of the last event returned. Use it as the next `since`.
+- `more` is `true` when more events after it are already waiting. Call again right away.
+- `truncated` is `true` when events after `since` had already been dropped from the buffer (the last 2000 are kept),
+  so the client has missed some.
 
 ```json
-{"seq": 1042, "events": [
-  {"seq": 1041, "ts": 1792915200123, "kind": "message", "mode": "mesh", "messageId": "m-7f3a9c",
-   "type": "request", "from": "n1", "to": "n4", "latencyMs": 6, "error": null},
-  {"seq": 1042, "ts": 1792915200400, "kind": "node-down", "nodeId": "n3", "detectedBy": "n1", "detectMs": 3100}
+{"seq": 1042, "more": false, "truncated": false, "events": [
+  {"id": "farzad-1041", "seq": 1041, "ts": 1792915200123, "type": "message.request", "from": "n1", "to": "n4",
+   "ok": true, "latencyMs": 6, "errorCode": null, "mode": "mesh", "messageId": "n1-1042", "requestId": "r-88"},
+  {"id": "farzad-1042", "seq": 1042, "ts": 1792915200400, "type": "node.down", "from": "n1", "to": "n3",
+   "ok": false, "latencyMs": null, "errorCode": "NODE_UNAVAILABLE", "mode": "mesh", "detectMs": 3100}
 ]}
 ```
 
-Event kinds: `message`, `node-up`, `node-down`, `mode-change`, `chaos`.
+These base fields are shared with the Gateway team's events: `id`, `ts`, `type`, `from`, `to`, `ok`, `latencyMs`,
+`errorCode`. Fields that do not apply are `null`. Extra fields per type are allowed. `id` is `farzad-<seq>`, so it
+does not clash with the gateway's events. `from` and `to` are node IDs, `"gateway"`, or `"*"` for a broadcast. For
+node events, `from` is who detected it and `to` is the node it is about.
+
+Event types: `message.request`, `message.oneway`, `message.broadcast`, `request.aborted`, `node.up`, `node.down`,
+`node.restarting`, `node.leaving`, `link.state`, `mode.change`, `messaging.enabled`, `messaging.disabled`, `chaos`.
 
 ## 6. Gateway mode (what we expect from Gateway, team pisak)
 
-Agreed in `#build`; the exact bodies are to be confirmed against `projects/pisak/CONTRACT.md`.
+Agreed in `#build`. The exact bodies are to be confirmed against `projects/pisak/CONTRACT.md`.
 
-- On entering gateway mode each node calls `POST /t/pisak/api/register` with
-  `{"nodeId": "n1", "apps": ["echo", "sink"], "deliverUrl": "/t/farzad/n/n1/deliver"}` and keeps the returned token.
-- Each send goes to `POST /t/pisak/api/route` with the envelope from section 1 and `Authorization: Bearer <token>`.
-- The gateway delivers to the node's `deliverUrl` and returns the node's answer, or an error from section 2.
-- On leaving gateway mode, or when a node is stopped, it calls `POST /t/pisak/api/deregister` with `{"nodeId": "n1"}`.
+- **Register:** `POST /t/pisak/api/register` with
+  `{"nodeId": "n1", "apps": [{"appId": "echo", "listenerIds": []}], "deliverUrl": "/t/farzad/n/n1/deliver", "heartbeatUrl": "/t/farzad/n/n1/heartbeat", "external": false}`.
+  The answer carries a token: `{"token": "..."}`.
+- **Route:** `POST /t/pisak/api/route` with the envelope from section 1 and the header
+  `Authorization: Bearer <token>`. The gateway delivers to the node's `deliverUrl` and returns the node's answer, or
+  an error from section 2. For a broadcast the gateway fans out to every registered node in `scope` except the
+  sender, and returns `{"delivered": [...], "failed": [...]}`.
+  The gateway respects `ttlMs` as the end-to-end budget, retries included.
+- **Deregister:** `POST /t/pisak/api/deregister` with `{"nodeId": "n1"}` and the same `Authorization` header, when
+  leaving gateway mode or when the node is stopped.
+- **Failures:**
+  - A `401` from route makes the node register again once, then retry the message once.
+  - A failed register: see the mode switch in section 4.
+  - When the gateway does not answer, the node answers its sender with `NODE_UNAVAILABLE` and `at: "gateway"`.
+  - A failed deregister is logged and ignored.
+
+## 7. Application message types
+
+Each application defines its own message types as numbers (`msgTypeId`) and keeps its own parameters in `payload`.
+It can give the numbers readable names when it registers (`"msgTypes": {"1": "QUERY", "2": "QUERY_RESULT"}`).
+Events and the Dashboard show the name instead of the number.
+
+## What changed since 0.1
+
+- **Envelope:**
+  - new `proto`, `version` and `scope`, and optional `msgTypeId` and `listenerId`;
+  - `messageId` format `<nodeId>-<counter>`;
+  - `ttlMs` is now the end-to-end budget.
+- **Addressing rules:** all apps on one node, one app on all nodes, listener instances, broadcast fan-out.
+- **New error codes:** `NO_LISTENER`, `PEER_OVERLOADED`, `MESSAGE_TOO_LARGE`, `BAD_PROTOCOL`, `MODE_SWITCH_FAILED`,
+  `MIN_NODES`. `REJECTED` has a `reason`.
+- **Delivery:**
+  - one-way failures are returned to the sender;
+  - duplicate suppression;
+  - heartbeat `seq`, `state` and clock sync;
+  - link states.
+- **Send:** async requests with abort, `userData`, and `outcome`.
+- **Mode switch:**
+  - commits per node, and rolls back only when the gateway itself fails;
+  - nodes that are down are skipped;
+  - sends are queued while a node is disabled.
+- **External nodes:** always reached through the gateway.
+- **Gateway links:** state comes from the calls to the gateway.
+- **Events:** paging with `more` and `truncated`.
+- **Chaos:** new actions `restart` and `skew`.
+- **Breaking, state:** `connections` is replaced by `possibleLinks` and `openConnections`.
+- **Breaking, events:** events use the shared shape. `kind` is now `type`, and `error` is now `errorCode`.
