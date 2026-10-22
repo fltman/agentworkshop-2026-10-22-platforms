@@ -18,16 +18,35 @@ class Metrics {
     this.start = Date.now();
     this.m = { mesh: { samples: [], detect: [] }, gateway: { samples: [], detect: [] } };
     this.runs = { mesh: null, gateway: null };
+    this.pending = { mesh: null, gateway: null };
   }
 
   // A new run of a mode replaces that mode's previous run.
   startRun(mode, now = Date.now()) {
     if (!(mode in this.runs)) return;
+    this.pending[mode] = null;
     this.runs[mode] = { startedTs: now, endedTs: null, topo: null, messages: 0, errors: 0, lat: [], detectSum: 0, detectCount: 0, failures: {} };
+  }
+
+  // After a mode switch: a finished run with messages is kept until the new run has its first message or detection,
+  // so switching into a mode and out again without traffic does not wipe its results.
+  armRun(mode, now = Date.now()) {
+    if (!(mode in this.runs)) return;
+    const r = this.runs[mode];
+    if (r && r.endedTs !== null && r.messages > 0) this.pending[mode] = now;
+    else this.startRun(mode, now);
+  }
+
+  // The run that takes new samples, starting a pending one; null when the mode is not active.
+  liveRun(mode) {
+    if (this.pending[mode] != null) this.startRun(mode, this.pending[mode]);
+    const r = this.runs[mode];
+    return r && r.endedTs === null ? r : null;
   }
 
   // Freezes the run, with the topology it had when the mode was left.
   endRun(mode, topo, now = Date.now()) {
+    this.pending[mode] = null;
     const r = this.runs[mode];
     if (!r || r.endedTs !== null) return;
     r.endedTs = now;
@@ -43,7 +62,7 @@ class Metrics {
     const durationMs = end - r.startedTs;
     return {
       startedTs: r.startedTs, endedTs: r.endedTs, durationMs,
-      nodes: t.nodes, openConnections: t.openConnections, possibleLinks: t.possibleLinks,
+      nodes: t.nodes, openConnections: t.openConnections, possibleLinks: t.possibleLinks, openPairs: t.openPairs, possiblePairs: t.possiblePairs,
       messages: r.messages,
       p50Ms: pct(lat, 0.5), p95Ms: pct(lat, 0.95),
       throughputPerSec: Math.round((r.messages / Math.max(1, durationMs / 1000)) * 10) / 10,
@@ -56,8 +75,8 @@ class Metrics {
   record(mode, latencyMs, ok, errorCode) {
     const b = this.m[mode];
     if (!b) return;
-    const r = this.runs[mode];
-    if (r && r.endedTs === null) {
+    const r = this.liveRun(mode);
+    if (r) {
       r.messages += 1;
       // Reservoir sample: every message has the same chance to be in the percentile sample.
       if (r.lat.length < RESERVOIR) r.lat.push(latencyMs);
@@ -72,8 +91,8 @@ class Metrics {
     const b = this.m[mode];
     if (!b) return;
     b.detect.push(Math.round(ms));
-    const r = this.runs[mode];
-    if (r && r.endedTs === null) { r.detectSum += Math.round(ms); r.detectCount += 1; }
+    const r = this.liveRun(mode);
+    if (r) { r.detectSum += Math.round(ms); r.detectCount += 1; }
     if (b.detect.length > 1000) b.detect.shift();
   }
 

@@ -6,10 +6,11 @@
 //   GET  /api/events?since=N -> {seq, events} with {kind:"node-down", detectMs} / node.up (probes heartbeatUrl every 1 s, down after 3 s)
 //   probes are {from:"gateway", ts, state, peers:{nodeId: up|slow|down}} (as pisak v0.5: never the probed node itself)
 //   POST /api/admin {action: kill|revive|reset}  the gateway stops answering (503), comes back, or forgets all nodes
+//   POST /api/admin {action: "peer", nodeId, status}  test hook: probes report that status for the node (null clears)
 const http = require('http');
 
 const PORT = Number(process.env.PORT || 8180);
-const st = { nodes: new Map(), down: false, seq: 0, events: [], timer: null, routes: 0 };
+const st = { nodes: new Map(), down: false, seq: 0, events: [], timer: null, routes: 0, peerOverride: new Map() };
 
 function call(path, body, headers = {}, timeoutMs = 2000) {
   return new Promise((resolve) => {
@@ -38,7 +39,7 @@ function auth(req) {
 }
 
 // Every probe carries the gateway's view of all other registered nodes (peers, additive). slow: answered, but late.
-const peerStatus = (n) => (n.status === 'up' && n.rttMs > 500 ? 'slow' : n.status);
+const peerStatus = (n) => st.peerOverride.get(n.nodeId) || (n.status === 'up' && n.rttMs > 500 ? 'slow' : n.status);
 async function probe() {
   for (const n of st.nodes.values()) {
     if (!n.heartbeatUrl) continue;
@@ -66,7 +67,11 @@ module.exports = {
       const b = (await readBody(req)) || {};
       if (b.action === 'kill') st.down = true;
       else if (b.action === 'revive') { st.down = false; st.nodes.clear(); } // registrations are lost, nodes re-register on 401
-      else if (b.action === 'reset') { st.nodes.clear(); st.events.length = 0; } // a killed gateway stays killed
+      else if (b.action === 'reset') { st.nodes.clear(); st.events.length = 0; st.peerOverride.clear(); } // a killed gateway stays killed
+      else if (b.action === 'peer') {
+        if (b.status) st.peerOverride.set(String(b.nodeId), String(b.status)); else st.peerOverride.delete(String(b.nodeId));
+        send(res, 200, { ok: true, peerOverride: Object.fromEntries(st.peerOverride) }); return true;
+      }
       else if ('down' in b) st.down = !!b.down;
       send(res, 200, { down: st.down }); return true;
     }

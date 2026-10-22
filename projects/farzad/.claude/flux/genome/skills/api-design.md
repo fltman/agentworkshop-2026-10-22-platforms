@@ -99,3 +99,6 @@ Poor API design indicators:
 
 REDUCE when: Frontend-only, no API work
 INCREASE when: Building APIs, authentication, security context
+
+## Additive contract changes (spore backend-10)
+Before shipping a new optional field, run the old and new module on the same fixed inputs without the field; the JSON output of every old field must be byte-identical. A diff means an old behaviour changed.

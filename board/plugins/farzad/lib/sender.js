@@ -136,7 +136,14 @@ class Sender {
     const remaining = () => Math.max(1, deadline - Date.now());
     const d = env.destination;
     if (d.nodeId === '*') return this.broadcast(node, env, deadline, signal);
-    if (node.route === 'gateway') return this.viaGateway(node, env, remaining(), signal);
+    if (node.route === 'gateway') {
+      // Fast fail: a fresh gateway peer view says the destination is down or leaving (CONTRACT.md section 5).
+      const v = node.peerView(d.nodeId, Date.now());
+      if (v.state === 'unreachable' || v.state === 'disabled') {
+        return { error: E.error('NODE_UNAVAILABLE', 'node', `gateway peer view of ${d.nodeId} is ${v.peerStatus}`) };
+      }
+      return this.viaGateway(node, env, remaining(), signal);
+    }
     const target = this.c.nodes.get(d.nodeId);
     if (!target) return { error: E.error('UNKNOWN_NODE', 'node', `no node ${d.nodeId}`) };
     if (target.external) return this.viaGateway(node, env, remaining(), signal);
@@ -164,11 +171,16 @@ class Sender {
       const reg = await c.registerNode(node);
       if (!reg.ok) return { error: stripErr(reg.error) };
     }
-    let r = await gw.route(node.token, env, timeoutMs + 200, signal);
+    const used = node.token;
+    let r = await gw.route(used, env, timeoutMs + 200, signal);
     if (r.status === 401) {
-      node.token = null;
-      const reg = await c.registerNode(node);
-      if (!reg.ok) return { error: stripErr(reg.error) };
+      // Register again only if no one did since this send took its token; otherwise retry with the new one.
+      if (node.token === used) node.token = null;
+      if (!node.token || node.registering) {
+        const reg = await c.registerNode(node);
+        if (!reg.ok) return { error: stripErr(reg.error) };
+      }
+      if (!node.token) return { error: E.error('NODE_UNAVAILABLE', 'gateway', `${node.id} is not registered with the gateway`) };
       r = await gw.route(node.token, env, timeoutMs + 200, signal);
     }
     if (r.aborted) return { aborted: true };
@@ -256,7 +268,7 @@ class Sender {
     const mix = { request: Math.max(0, Number(m.request) || 0), oneway: Math.max(0, Number(m.oneway) || 0), broadcast: Math.max(0, Number(m.broadcast) || 0) };
     if (!(mix.request + mix.oneway + mix.broadcast)) mix.request = 1;
     const payloadBytes = Math.max(0, Math.min(Number(b.payloadBytes) || 0, 60000));
-    this.traffic = { rate, mix, payloadBytes };
+    this.traffic = { rate, mix, payloadBytes, includeDown: b.includeDown === true };
     return this.traffic;
   }
 
@@ -271,7 +283,8 @@ class Sender {
   }
 
   fireOne(t) {
-    const cluster = this.c.clusterNodes().filter((n) => n.status === 'up');
+    const all = this.c.clusterNodes();
+    const cluster = all.filter((n) => n.status === 'up');
     const senders = cluster.filter((n) => n.messaging === 'enabled');
     if (!senders.length) return;
     const from = senders[Math.floor(Math.random() * senders.length)];
@@ -281,7 +294,8 @@ class Sender {
     let to;
     if (type === 'broadcast') to = { nodeId: '*', appId: 'sink' };
     else {
-      const dests = cluster.filter((n) => n !== from);
+      // includeDown: killed and restarting nodes stay destinations, so a failure shows up in the error rate.
+      const dests = (t.includeDown ? all.filter((n) => n.status !== 'leaving') : cluster).filter((n) => n !== from);
       if (!dests.length) return;
       to = { nodeId: dests[Math.floor(Math.random() * dests.length)].id, appId: type === 'request' ? 'echo' : 'sink' };
     }

@@ -10,6 +10,7 @@ const { Metrics } = require('./metrics');
 const MAX_NODES = 20;
 const MIN_NODES = 3;
 const HB_TIMEOUT_MS = 900;
+const POLL_DOWN_MS = 200;
 const log = (...a) => console.error('[farzad]', ...a);
 
 // Runs fn and reports, never throws: used for every timer callback and fire-and-forget promise.
@@ -53,6 +54,8 @@ class Cluster {
     this.hbSeq = 0;
     this.gwSeq = 0;
     this.gwResetDone = false;
+    this.pollingDown = false;
+    this.lastDownPoll = 0;
     this.tickers = [];
     this.sender = null;
   }
@@ -216,13 +219,13 @@ class Cluster {
   tick() {
     if (this.mode === 'mesh') this.heartbeatRound();
     this.retryRegistrations();
-    guard(() => this.pollGatewayDown());
   }
 
   fastTick() {
     const now = Date.now();
     for (const n of this.nodes.values()) n.expireWaiters(now);
     if (this.sender) this.sender.trafficTick();
+    if (now - this.lastDownPoll >= POLL_DOWN_MS) { this.lastDownPoll = now; guard(() => this.pollGatewayDown()); }
   }
 
   heartbeatRound() {
@@ -263,13 +266,22 @@ class Cluster {
 
   // ----- gateway registration -----
 
-  async registerNode(n) {
+  // Single flight: the gateway issues a new token on every register, so concurrent registrations of one node
+  // would invalidate each other's tokens. Callers that arrive while one is running share its result.
+  registerNode(n) {
+    if (n.registering) return n.registering;
+    const p = this.doRegister(n);
+    n.registering = p;
+    const clear = () => { if (n.registering === p) n.registering = null; };
+    p.then(clear, clear);
+    return p;
+  }
+
+  async doRegister(n) {
     const ep = this.epoch;
-    n.registering = true;
     n.lastRegisterTs = Date.now();
     this.setGwLink(n, 'initializing');
-    let r;
-    try { r = await gw.register(n); } finally { n.registering = false; }
+    const r = await gw.register(n);
     if (ep !== this.epoch || !this.nodes.has(n.id)) return r;
     if (r.ok && n.status === 'up') this.adopt(n, r);
     else if (!r.ok) {
@@ -306,12 +318,15 @@ class Cluster {
     }
   }
 
-  // Gateway mode: the gateway's down reports give detectMs for killed nodes.
+  // Gateway mode: the gateway's down reports give detectMs for killed nodes. Polled every POLL_DOWN_MS while a kill
+  // waits for detection, so the poll adds little to detectMs.
   async pollGatewayDown() {
-    if (this.mode !== 'gateway') return;
+    if (this.mode !== 'gateway' || this.pollingDown) return;
     if (![...this.nodes.values()].some((n) => n.killTs !== null)) return;
     const ep = this.epoch;
-    const r = await gw.events(this.gwSeq);
+    this.pollingDown = true;
+    let r;
+    try { r = await gw.events(this.gwSeq); } finally { this.pollingDown = false; }
     if (ep !== this.epoch || r.status !== 200 || !r.body || !Array.isArray(r.body.events)) return;
     if (typeof r.body.seq === 'number') this.gwSeq = r.body.seq;
     for (const e of r.body.events) {
@@ -319,11 +334,13 @@ class Cluster {
       if (kind !== 'node.down' && kind !== 'node-down') continue;
       const n = this.nodes.get(e.to);
       if (!n || n.killTs === null || (typeof e.ts === 'number' && e.ts < n.killTs)) continue;
-      const detectMs = typeof e.detectMs === 'number' ? e.detectMs : (typeof e.ts === 'number' ? e.ts : Date.now()) - n.killTs;
+      // Same definition as mesh: from the kill until our runtime learns of the failure. The gateway's own figure
+      // (pisak: from its last good probe) is kept on the event as gatewayDetectMs.
+      const detectMs = Date.now() - n.killTs;
       n.killTs = null;
       n.reportedDown = true;
       this.metrics.detect('gateway', detectMs);
-      this.emit({ type: 'node.down', from: 'gateway', to: n.id, ok: false, errorCode: 'NODE_UNAVAILABLE', detectMs });
+      this.emit({ type: 'node.down', from: 'gateway', to: n.id, ok: false, errorCode: 'NODE_UNAVAILABLE', detectMs, gatewayDetectMs: typeof e.detectMs === 'number' ? e.detectMs : null });
     }
   }
 
@@ -346,7 +363,7 @@ class Cluster {
       const r = target === 'gateway' ? await this.toGateway(start, ep) : await this.toMesh(start, ep);
       if (ep === this.epoch && this.mode === target) {
         this.metrics.endRun(from, topo);
-        this.metrics.startRun(target);
+        this.metrics.armRun(target);
       }
       return r;
     } finally {
@@ -366,13 +383,12 @@ class Cluster {
     if (ep !== this.epoch) return { status: 502, body: { error: { code: 'MODE_SWITCH_FAILED', at: 'node', message: 'cluster was reset' }, failed: [] } };
     const up = cluster.filter((n) => n.status === 'up');
     const results = await Promise.all(up.map(async (n) => {
-      const r = await gw.register(n);
-      if (r.ok && ep === this.epoch && n.status === 'up') {
-        this.adopt(n, r);
+      const r = await this.registerNode(n);
+      if (r.ok && ep === this.epoch && n.status === 'up' && n.token) {
         n.route = 'gateway';
         n.forceDisabled = false;
         this.recompute(n);
-      } else if (!r.ok) this.setGwLink(n, r.error.unreachable ? 'unreachable' : 'disabled');
+      }
       return { n, r };
     }));
     if (ep !== this.epoch) return { status: 502, body: { error: { code: 'MODE_SWITCH_FAILED', at: 'node', message: 'cluster was reset' }, failed: [] } };
@@ -467,6 +483,8 @@ class Cluster {
     n.killTs = null;
     for (const l of this.links.values()) if (l.from === n.id) this.apply(L.forceDown(l));
     if (n.route === 'gateway' || n.external) {
+      // Mesh clears it when a peer's link turns reachable again; via the gateway nothing else would.
+      n.reportedDown = false;
       n.token = null;
       n.lastRegisterTs = 0;
       this.setGwLink(n, 'disabled');
@@ -485,17 +503,27 @@ class Cluster {
     const all = [...this.nodes.values()];
     let possible = 0;
     let open = 0;
+    let possiblePairs = 0;
+    let openPairs = 0;
     if (this.mode === 'mesh') {
       const c = all.filter((n) => !n.external).length;
       possible = c * (c - 1);
-      for (const l of this.links.values()) if (l.state === 'reachable') open += 1;
+      possiblePairs = possible / 2;
+      for (const l of this.links.values()) {
+        if (l.state !== 'reachable') continue;
+        open += 1;
+        // An undirected pair is open when both directions are; count it once, from the lower key.
+        const back = this.links.get(`${l.to}>${l.from}`);
+        if (l.key < `${l.to}>${l.from}` && back && back.state === 'reachable') openPairs += 1;
+      }
     }
     for (const n of all) {
       if (this.mode !== 'gateway' && !n.external) continue;
       possible += 1;
-      if (n.gwLink.state === 'reachable') open += 1;
+      possiblePairs += 1;
+      if (n.gwLink.state === 'reachable') { open += 1; openPairs += 1; }
     }
-    return { nodes: all.length, openConnections: open, possibleLinks: possible };
+    return { nodes: all.length, openConnections: open, possibleLinks: possible, openPairs, possiblePairs };
   }
 
   state() {
@@ -526,6 +554,8 @@ class Cluster {
       links,
       possibleLinks: topo.possibleLinks,
       openConnections: topo.openConnections,
+      possiblePairs: topo.possiblePairs,
+      openPairs: topo.openPairs,
       metrics: {
         mesh: this.metrics.snapshot('mesh'),
         gateway: this.metrics.snapshot('gateway'),

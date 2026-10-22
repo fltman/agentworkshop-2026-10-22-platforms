@@ -40,7 +40,7 @@ class VirtualNode {
     this.route = 'mesh';
     this.forceDisabled = false;
     this.token = null;
-    this.registering = false;
+    this.registering = null;
     this.lastRegisterTs = 0;
     this.lastProbeTs = 0;
     this.probeIntervalMs = 1000;

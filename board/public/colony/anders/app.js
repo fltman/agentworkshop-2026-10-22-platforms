@@ -112,7 +112,8 @@ const el = (tag, attrs, parent) => {
   return n;
 };
 const LINK_RANK = { reachable: 3, initializing: 2, restarting: 1, unreachable: 0 };
-const LINK_COLOR = { 3: '#2f6f5a', 2: '#ffb454', 1: '#ffb454', 0: '#ff6b6b' };
+const tc = k => getComputedStyle(document.documentElement).getPropertyValue('--' + k).trim();
+const linkColor = r => ({ 3: tc('okline'), 2: tc('accent'), 1: tc('accent'), 0: tc('bad') })[r];
 
 function layout() {
   const n = model.nodes.length;
@@ -138,20 +139,20 @@ function renderTopology() {
     for (const k in pairs) {
       const [a, b] = k.split('|');
       if (!pos[a] || !pos[b]) continue;
-      el('line', { x1: pos[a].x, y1: pos[a].y, x2: pos[b].x, y2: pos[b].y, stroke: LINK_COLOR[pairs[k]],
+      el('line', { x1: pos[a].x, y1: pos[a].y, x2: pos[b].x, y2: pos[b].y, stroke: linkColor(pairs[k]),
         'stroke-width': 1, 'stroke-opacity': pairs[k] === 3 ? 0.45 : 0.9, 'stroke-dasharray': pairs[k] === 0 ? '4 4' : '' }, links);
     }
   } else {
     for (const l of model.links) {
       if (l.to !== 'gateway' || !pos[l.from]) continue;
       const rank = LINK_RANK[l.state ?? (l.status === 'up' ? 'reachable' : 'unreachable')] ?? 0;
-      el('line', { x1: pos[l.from].x, y1: pos[l.from].y, x2: CX, y2: CY, stroke: LINK_COLOR[rank], 'stroke-width': 1.5,
+      el('line', { x1: pos[l.from].x, y1: pos[l.from].y, x2: CX, y2: CY, stroke: linkColor(rank), 'stroke-width': 1.5,
         'stroke-dasharray': rank === 0 ? '4 4' : '' }, links);
     }
   }
   const gwStatus = model.gw?.gateway?.status;
-  const gwColor = gwStatus === 'down' ? '#ff6b6b' : gwStatus === 'up' ? '#7aa2ff' : '#3a4560';
-  el('rect', { x: CX - 34, y: CY - 16, width: 68, height: 32, rx: 6, fill: '#0c1324', stroke: gwColor,
+  const gwColor = gwStatus === 'down' ? tc('bad') : gwStatus === 'up' ? tc('info') : tc('dim');
+  el('rect', { x: CX - 34, y: CY - 16, width: 68, height: 32, rx: 6, fill: tc('card'), stroke: gwColor,
     'stroke-width': 2, opacity: gwMode ? 1 : 0.35 }, nodesG);
   el('text', { x: CX, y: CY + 4, 'text-anchor': 'middle', fill: gwColor, 'font-size': 11, opacity: gwMode ? 1 : 0.5 }, nodesG)
     .textContent = gwStatus === 'down' ? 'GW DOWN' : 'gateway';
@@ -160,16 +161,16 @@ function renderTopology() {
   for (const n of model.nodes) {
     const p = pos[n.nodeId], g = gwNodes[n.nodeId] || {};
     const slow = (n.chaos?.delayMs || 0) > 0 || g.status === 'slow';
-    const fill = n.status === 'up' ? '#5fd7a7' : n.status === 'down' ? '#ff6b6b' : '#ffb454';
+    const fill = n.status === 'up' ? tc('good') : n.status === 'down' ? tc('bad') : tc('accent');
     const grp = el('g', { style: 'cursor:pointer', opacity: n.messaging === 'disabled' ? 0.55 : 1 }, nodesG);
     grp.addEventListener('click', () => { selected = n.nodeId; render(); });
-    el('circle', { cx: p.x, cy: p.y, r: 15, fill: '#0c1324', stroke: fill, 'stroke-width': 3,
+    el('circle', { cx: p.x, cy: p.y, r: 15, fill: tc('card'), stroke: fill, 'stroke-width': 3,
       'stroke-dasharray': (n.chaos?.dropPercent || 0) > 0 ? '5 3' : '' }, grp);
-    if (slow) el('circle', { cx: p.x, cy: p.y, r: 20, fill: 'none', stroke: '#ff9f43', 'stroke-width': 1.5 }, grp);
-    if (selected === n.nodeId) el('circle', { cx: p.x, cy: p.y, r: 24, fill: 'none', stroke: '#fff', 'stroke-width': 1 }, grp);
-    el('text', { x: p.x, y: p.y + 4, 'text-anchor': 'middle', fill: '#e9eef7', 'font-size': 11 }, grp).textContent = n.nodeId;
+    if (slow) el('circle', { cx: p.x, cy: p.y, r: 20, fill: 'none', stroke: tc('warn'), 'stroke-width': 1.5 }, grp);
+    if (selected === n.nodeId) el('circle', { cx: p.x, cy: p.y, r: 24, fill: 'none', stroke: tc('ring'), 'stroke-width': 1 }, grp);
+    el('text', { x: p.x, y: p.y + 4, 'text-anchor': 'middle', fill: tc('text'), 'font-size': 11 }, grp).textContent = n.nodeId;
     if (g.circuit && g.circuit !== 'closed')
-      el('text', { x: p.x, y: p.y - 22, 'text-anchor': 'middle', fill: '#c792ea', 'font-size': 10 }, grp).textContent = 'circuit ' + g.circuit;
+      el('text', { x: p.x, y: p.y - 22, 'text-anchor': 'middle', fill: tc('purple'), 'font-size': 10 }, grp).textContent = 'circuit ' + g.circuit;
     el('title', {}, grp).textContent =
       `${n.nodeId}: ${n.status}, messaging ${n.messaging || '-'}` + (g.circuit ? `, circuit ${g.circuit}` : '') +
       (slow ? ', slow' : '') + ((n.chaos?.dropPercent || 0) > 0 ? `, drop ${n.chaos.dropPercent}%` : '');
@@ -185,7 +186,7 @@ function animate(e) {
   for (const t of targets) {
     if (!pos[t]) continue;
     const path = viaGw ? [pos[e.from], pos.gateway, pos[t]] : [pos[e.from], pos[t]];
-    const dot = el('circle', { r: e.to === '*' ? 2.5 : 3.5, fill: e.ok === false ? '#ff6b6b' : '#ffe08a' }, $('#flow'));
+    const dot = el('circle', { r: e.to === '*' ? 2.5 : 3.5, fill: e.ok === false ? tc('bad') : tc('flow') }, $('#flow'));
     flying.push({ dot, path, start: performance.now(), dur: 700 });
   }
 }
@@ -316,3 +317,12 @@ $('#gwRevive').addEventListener('click', () => call('pisak', 'POST', '/admin', {
 pollState();
 setInterval(pollState, 1000);
 setInterval(pollEvents, 500);
+
+// Visual theme only: colors, radius, font. Persisted in localStorage, no effect on data or controls.
+(function () {
+  const sel = $('#theme'); if (!sel) return;
+  let t = 'night'; try { t = localStorage.getItem('anders-theme') || 'night'; } catch {}
+  const set = v => { document.documentElement.dataset.theme = v; sel.value = v; try { localStorage.setItem('anders-theme', v); } catch {} render(); };
+  sel.addEventListener('change', () => set(sel.value));
+  set(['night', 'daylight', 'terminal', 'ocean'].includes(t) ? t : 'night');
+})();

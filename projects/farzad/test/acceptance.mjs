@@ -58,6 +58,7 @@ await check('reset 5 nodes in mesh', async () => {
   await until(async () => { const s = await state(); return s.nodes.length === 5 && s.openConnections === 20; }, 8000, 'openConnections 20');
   const s = await state();
   ok(s.mode === 'mesh' && s.possibleLinks === 20, `mode ${s.mode} possibleLinks ${s.possibleLinks}`);
+  ok(s.possiblePairs === 10 && s.openPairs === 10, `pairs ${s.openPairs}/${s.possiblePairs}`);
   ok(s.heartbeat && s.heartbeat.intervalMs === 1000 && s.heartbeat.missesBeforeDown === 3, 'heartbeat settings');
   ok(s.maxMessageBytes === 65536, 'maxMessageBytes');
   ok(s.nodes.every((n) => n.messaging === 'enabled' && n.status === 'up'), 'all nodes up and enabled');
@@ -435,6 +436,7 @@ await check('switch to gateway mode and route through it', async () => {
   const s = await state();
   checkInternals(s);
   ok(s.links.every((l) => l.misses === null), 'gateway links have misses null');
+  ok(s.possiblePairs === 5 && s.openPairs === s.openConnections, `gateway pairs ${s.openPairs}/${s.possiblePairs}`);
   const n1 = node(s, 'n1');
   ok(n1.gateway.registered === true && isNum(n1.gateway.lastProbeAgeMs), `n1 gateway ${JSON.stringify(n1.gateway)}`);
   ok(n1.counters.sent.request >= 1 && n1.counters.sent.broadcast >= 1, `n1 counters ${JSON.stringify(n1.counters.sent)}`);
@@ -472,11 +474,94 @@ await check('gateway mode: per-peer counters and peer views (unknown when the ga
   console.log(`INFO gateway sends peers in probes: ${gatewaySendsPeers}`);
 });
 
-await check('gateway mode: kill node, detection via gateway', async () => {
+{
+  const name = 'gateway mode: a fresh peer view down/leaving fails fast at the node; slow sends as usual';
+  const probe = await post(`${G}/api/admin`, { action: 'peer', nodeId: 'n2', status: 'leaving' });
+  if (!(probe.status === 200 && probe.body && probe.body.peerOverride)) skip(name, 'this gateway has no peer override hook');
+  else {
+    await check(name, async () => {
+      const view = (s) => s.links.find((l) => l.via === 'gateway' && l.from === 'n1' && l.to === 'n2');
+      const fails = (s) => ((node(s, 'n1').counters.byPeer.n2 || {}).failures || {}).NODE_UNAVAILABLE || 0;
+      try {
+        await until(async () => view(await state()).state === 'disabled', 4000, 'n1 sees n2 leaving');
+        const a = await state();
+        const before = await routed();
+        const r = await send({ type: 'request', to: { nodeId: 'n2', appId: 'echo' }, ttlMs: 3000 });
+        ok(r.body.outcome === 'failure' && r.body.error.code === 'NODE_UNAVAILABLE' && r.body.error.at === 'node', JSON.stringify(r.body));
+        ok(r.body.latencyMs < 500, `fast: ${r.body.latencyMs} ms`);
+        ok(await routed() === before, 'not sent to the gateway');
+        const b = await state();
+        ok(fails(b) - fails(a) === 1, 'n1 byPeer.n2 failures.NODE_UNAVAILABLE +1');
+        await post(`${G}/api/admin`, { action: 'peer', nodeId: 'n2', status: 'down' });
+        await until(async () => view(await state()).state === 'unreachable', 4000, 'n1 sees n2 down');
+        const o = await send({ type: 'oneway', to: { nodeId: 'n2', appId: 'sink' } });
+        ok(o.body.outcome === 'error' && o.body.error.code === 'NODE_UNAVAILABLE' && o.body.error.at === 'node', JSON.stringify(o.body));
+        await post(`${G}/api/admin`, { action: 'peer', nodeId: 'n2', status: 'slow' });
+        await until(async () => view(await state()).peerStatus === 'slow', 4000, 'n1 sees n2 slow');
+        const ok2 = await send({ type: 'request', to: { nodeId: 'n2', appId: 'echo' } });
+        ok(ok2.body.outcome === 'response', `slow peer still gets traffic ${JSON.stringify(ok2.body)}`);
+      } finally {
+        await post(`${G}/api/admin`, { action: 'peer', nodeId: 'n2', status: null });
+      }
+      await until(async () => view(await state()).peerStatus === 'up', 4000, 'n1 sees n2 up again');
+    });
+  }
+}
+
+await check('gateway mode: kill node, detection via gateway, measured from the kill like mesh', async () => {
+  const since = await lastSeq();
+  const t0 = Date.now();
   await post(`${N}/api/chaos`, { action: 'kill', nodeId: 'n4' });
   await until(async () => (await state()).metrics.gateway.detectMs !== null, 9000, 'gateway detectMs');
+  const elapsed = Date.now() - t0;
   const s = await state();
-  ok(s.metrics.gateway.detectMs >= 1000 && s.metrics.gateway.detectMs <= 7000, `detectMs ${s.metrics.gateway.detectMs}`);
+  const d = s.metrics.gateway.detectMs;
+  ok(d >= 1000 && d <= 7000, `detectMs ${d}`);
+  ok(d <= elapsed, `detectMs ${d} counts from the kill, at most the ${elapsed} ms the test waited`);
+  ok(s.metrics.lastRun.gateway.detectMsAvg === d && s.metrics.gateway.detectMsAvg === d, `same definition: ${JSON.stringify(s.metrics.lastRun.gateway)}`);
+  const ev = (await eventsSince(since)).find((e) => e.type === 'node.down' && e.to === 'n4');
+  ok(ev && ev.detectMs === d && 'gatewayDetectMs' in ev, `node.down event ${JSON.stringify(ev)}`);
+});
+
+{
+  const name = 'gateway mode: a killed node turns unreachable in the other nodes\' peer views';
+  if (!gatewaySendsPeers) skip(name, 'this gateway sends no peers in its probes');
+  else {
+    await check(name, async () => {
+      const seen = (s) => s.links.filter((l) => l.via === 'gateway' && l.to === 'n4' && l.from !== 'n4');
+      await until(async () => seen(await state()).every((l) => l.state === 'unreachable'), 8000, 'n4 unreachable in views');
+      const s = await state();
+      ok(seen(s).length === 4, 'four observers');
+      ok(s.links.some((l) => l.via === 'gateway' && l.from === 'n1' && l.to === 'n2' && l.state === 'reachable'), 'live peers still reachable');
+      ok(s.summary.peerViews.unreachable >= 4, JSON.stringify(s.summary.peerViews));
+    });
+    await check('gateway mode: a send to a node the peer view shows down fails fast with NODE_UNAVAILABLE', async () => {
+      const a = await state();
+      const before = await routed();
+      const r = await send({ type: 'request', to: { nodeId: 'n4', appId: 'echo' }, ttlMs: 3000 });
+      ok(r.body.outcome === 'failure' && r.body.error.code === 'NODE_UNAVAILABLE' && r.body.error.at === 'node', JSON.stringify(r.body));
+      ok(r.body.latencyMs < 500 && await routed() === before, `fast and local: ${r.body.latencyMs} ms`);
+      const b = await state();
+      const f = (s) => ((node(s, 'n1').counters.byPeer.n4 || {}).failures || {}).NODE_UNAVAILABLE || 0;
+      ok(f(b) - f(a) === 1 && (b.summary.failures.NODE_UNAVAILABLE || 0) > (a.summary.failures.NODE_UNAVAILABLE || 0), 'counted by code and by peer');
+    });
+  }
+}
+
+await check('traffic: killed node is skipped by default, targeted with includeDown', async () => {
+  const toN4 = (s) => s.nodes.reduce((x, n) => x + (((n.counters.byPeer.n4 || {}).sent || {}).request || 0), 0);
+  const a = await state();
+  await post(`${N}/api/traffic`, { rate: 30, mix: { request: 1 } });
+  await sleep(1500);
+  const b = await state();
+  ok(toN4(b) === toN4(a), `default traffic sent ${toN4(b) - toN4(a)} requests to killed n4`);
+  const t = await post(`${N}/api/traffic`, { rate: 30, mix: { request: 1 }, includeDown: true });
+  ok(t.body.includeDown === true, JSON.stringify(t.body));
+  await sleep(1500);
+  await post(`${N}/api/traffic`, { rate: 0 });
+  const c = await state();
+  ok(toN4(c) - toN4(b) >= 3, `includeDown sent ${toN4(c) - toN4(b)} requests to n4`);
+  ok((c.metrics.lastRun.gateway.failures.NODE_UNAVAILABLE || 0) > (b.metrics.lastRun.gateway.failures.NODE_UNAVAILABLE || 0), 'failures show in the gateway run');
 });
 
 {
@@ -505,6 +590,24 @@ await check('gateway revive drops registrations: node re-registers on 401 and th
   let last;
   await until(async () => { last = await send({ type: 'request', to: { nodeId: 'n2', appId: 'echo' } }); return last.body.outcome === 'response'; }, 8000, 'send after revive');
   ok(last.body.outcome === 'response', JSON.stringify(last.body));
+});
+
+await check('gateway restart under traffic: single-flight re-register, no REJECTED auth', async () => {
+  const rejected = (s) => s.summary.failures.REJECTED || 0;
+  const a = await state();
+  await post(`${N}/api/traffic`, { rate: 40, mix: { request: 0.7, oneway: 0.3 } });
+  try {
+    await sleep(1000);
+    await post(`${G}/api/admin`, { action: 'kill' });
+    await sleep(1500);
+    await post(`${G}/api/admin`, { action: 'revive' });
+    await until(async () => (await send({ type: 'request', to: { nodeId: 'n2', appId: 'echo' } })).body.outcome === 'response', 8000, 'send after revive');
+    await sleep(2000);
+  } finally { await post(`${N}/api/traffic`, { rate: 0 }); }
+  await sleep(500);
+  const b = await state();
+  ok(rejected(b) === rejected(a), `REJECTED +${rejected(b) - rejected(a)}: ${JSON.stringify(b.summary.failures)}`);
+  ok(b.nodes.filter((n) => n.status === 'up').every((n) => n.gateway.registered && n.messaging === 'enabled'), 'every live node registered again');
 });
 
 {
@@ -561,7 +664,12 @@ await check('lastRun: each mode keeps its whole-run results after a switch; rese
   s = await state();
   const gw = s.metrics.lastRun.gateway;
   ok(gw.endedTs !== null && gw.messages === 2 && gw.possibleLinks === 5 && gw.failures && !Object.keys(gw.failures).length, `gateway run ${JSON.stringify(gw)}`);
-  ok(s.metrics.lastRun.mesh.endedTs === null && s.metrics.lastRun.mesh.messages === 0, 'new mesh run replaced the old one');
+  ok(JSON.stringify(s.metrics.lastRun.mesh) === JSON.stringify(m), 'finished mesh run kept until mesh traffic flows');
+  await send({ type: 'request', to: { nodeId: 'n2', appId: 'echo' } });
+  s = await state();
+  const fresh = s.metrics.lastRun.mesh;
+  ok(fresh.endedTs === null && fresh.messages === 1 && fresh.startedTs >= m.endedTs, `new mesh run after its first message ${JSON.stringify(fresh)}`);
+  ok(JSON.stringify(s.metrics.lastRun.gateway) === JSON.stringify(gw), 'gateway run stays frozen');
   ok('p50Ms' in s.metrics.mesh && 'p50Ms' in s.metrics.gateway, 'rolling metrics unchanged');
 });
 

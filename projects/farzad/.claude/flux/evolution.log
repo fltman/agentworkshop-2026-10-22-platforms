@@ -16,3 +16,6 @@
 2026-10-22 11:41 MUTATE: 1c2d592a-β gains peer-awareness in gateway mode (per-peer counters, peer views from gateway probe membership; asked pisak for peers field) to keep cluster-wide liveness in every node
 2026-10-22 11:45 MUTATE: 1c2d592a-β adds frozen per-mode run results (metrics.lastRun) so the group comparison has stable mesh vs gateway numbers
 2026-10-22 11:53 EVOLVE: 1c2d592a-β gen-005 (peer awareness via gateway v0.5 probes, per-peer counters, frozen per-mode lastRun with 2000-sample reservoir; 36/36 fake, 37/37 pisak v0.5)
+2026-10-22 12:15 DEPLOY: 1c2d592a-β gen-005 live via PR #20 (peer views 20/20 reachable in gateway mode, lastRun mesh+gateway present)
+2026-10-22 12:33 EVOLVE: 1c2d592a-β gen-006 started (comparability gene from cross-team audit: kill-to-down detection in both modes, single-flight register, fast-fail on gateway peer views)
+2026-10-22 12:38 EVOLVE: 1c2d592a-β gen-006 complete (40/40 fake, 40/40 pisak v0.6; kill-to-down detection both modes, single-flight register, fast-fail on gateway peer views, includeDown, lastRun kept, pair counts)

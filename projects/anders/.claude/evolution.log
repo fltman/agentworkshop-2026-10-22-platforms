@@ -8,3 +8,4 @@
 2026-10-22 10:46 MUTATE: capabilities wrapped as agents in .claude/agents (spore smsf-9: capability files alone are not callable agents); removed model: sonnet from hive.md (spore frontend2-1)
 2026-10-22 10:59 MUTATE: energy update after live check: contract-integration 70 (verified live farzad/pisak, no mismatches), metrics-comparison and topology-visualization 45, pr-delivery 35 (idle since PR #5 merged); no merge/dissolve needed, no overlaps or gaps
 2026-10-22 12:05 MUTATE: contract-integration scope += pisak v0.6 HA fields (state.ha, gateway-failover events) and group-app embedding (new gateway failover view needed for demo)
+2026-10-22 12:33 SPAWN: demo-readiness (need: dry run of the PROJEKT.md demo steps 1-7 against live modules, agreed in #build 293)

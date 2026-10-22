@@ -1,7 +1,7 @@
 # NodeLink Node module: contract (team farzad)
 
 Owner: team `farzad`. Version: `0.2` (draft). Changes are announced in `#build` before they ship. What changed since
-0.1 is listed at the end.
+0.1 is listed at the end, followed by the additive changes made after 0.2.
 
 Nodes are virtual nodes running inside the board plugin `board/plugins/farzad/`. Every call between nodes, and between
 nodes and the gateway, is a real HTTP/JSON call. Base URL: `/t/farzad/` on the group's board.
@@ -170,7 +170,7 @@ A send from a `disabled` node is queued, not rejected. It goes out as soon as th
 | `POST /t/farzad/api/send` | see below | Makes one node send one message. |
 | `GET /t/farzad/api/requests/<requestId>` | | Result of an async request. |
 | `DELETE /t/farzad/api/requests/<requestId>` | | Aborts a pending request. No result is recorded after an abort. |
-| `POST /t/farzad/api/traffic` | `{"rate": 20, "mix": {"request": 0.6, "oneway": 0.3, "broadcast": 0.1}, "payloadBytes": 256}` | Built-in traffic generator. `{"rate": 0}` stops it. |
+| `POST /t/farzad/api/traffic` | `{"rate": 20, "mix": {"request": 0.6, "oneway": 0.3, "broadcast": 0.1}, "payloadBytes": 256, "includeDown": false}` | Built-in traffic generator. `{"rate": 0}` stops it. Senders are random `up` cluster nodes with messaging enabled. Destinations are the other `up` cluster nodes; with `"includeDown": true` (opt-in, default `false`) they also include `down` and `restarting` nodes, so a kill shows up in the error rate. The answer echoes the settings. |
 | `POST /t/farzad/api/chaos` | see below | Fault injection on nodes. |
 
 Every node has the built-in applications `echo` (answers a request with its payload) and `sink` (accepts one-way
@@ -284,12 +284,21 @@ Switching back to mesh deregisters every node from the gateway, then rebuilds th
   one gateway link per external node; one gateway link per node in gateway mode. n counts every node not stopped with
   `DELETE`, so a killed node still counts: it is the gap between `possibleLinks` and `openConnections`.
 - `openConnections`: the links that are `reachable` right now. It drops when a node is killed.
+- `possiblePairs` and `openPairs` (additive): the same as undirected connections, for drawings with one line per
+  pair. In mesh mode, n·(n−1)/2 node pairs, and a pair is open when both directed links are `reachable`. A gateway
+  link is already one connection, so it counts once in both. 5 nodes in mesh: 20 links, 10 pairs; in gateway mode: 5
+  and 5.
 - Latency, throughput and error rate use a rolling 10-second window. `detectMs` is the latest value, `detectMsAvg` the
   average since the last reset.
-- `detectMs` in mesh mode: from the `kill` until the first peer marks the node `unreachable`. In gateway mode: from
-  the `kill` until the gateway reports the node as down: an event with `kind` `node-down` and `to` = the nodeId on
-  `GET /t/pisak/api/events?since=N`. Before a switch to gateway mode the node module calls
-  `POST /t/pisak/api/admin {"action": "reset"}`. Planned leaves and restarts are not counted.
+- `detectMs` has one definition in both modes: the time from the `kill` until our node runtime learns that the node
+  is down, both taken on the node module's clock. In mesh mode that is when the first peer marks the node
+  `unreachable`. In gateway mode it is when the node module sees the gateway's down report: an event with `kind`
+  `node-down` and `to` = the nodeId on `GET /t/pisak/api/events?since=N`, polled every 200 ms while a killed node
+  waits for detection. The gateway's own figure (which may start at its last good probe, not at the kill) is not
+  used for `detectMs`; it is kept on our `node.down` event as `gatewayDetectMs` (`null` if the gateway gives none).
+  `metrics.<mode>.detectMs`, `detectMsAvg` and `lastRun.<mode>.detectMsAvg` all use this definition. Before a
+  switch to gateway mode the node module calls `POST /t/pisak/api/admin {"action": "reset"}`. Planned leaves and
+  restarts are not counted.
 
 #### Node internals (additive, v0.2 compatible)
 
@@ -345,7 +354,13 @@ Extra fields; nothing above is renamed or removed. All counters start at 0 on `P
   when `unknown`). `unknown` (outside the link-state machine) when the
   gateway never sent `peers`, left the peer out of its latest probe, or the probes stopped for 3 × `probeIntervalMs`.
   `lastHeartbeatTs` is the latest probe that named the peer. Peer views do not count in `possibleLinks`,
-  `openConnections` or `summary.linksByState`; `summary.peerViews` counts them by state. Sending does not use them.
+  `openConnections` or `summary.linksByState`; `summary.peerViews` counts them by state.
+- **Fast fail on peer views:** in gateway mode, a request or one-way send to a node whose peer view (from the
+  sender's own latest probe, fresh as defined above) is `unreachable` (gateway says `down`) or `disabled` (`leaving`)
+  fails at once with `NODE_UNAVAILABLE` and `at: "node"`, the same code mesh mode gives for an unusable link. It is
+  not sent to the gateway, and it is counted in `counters.failures` and `byPeer` like any failed send. `reachable`
+  (`up`, `slow`), `restarting` and `unknown` views, stale views, and broadcasts are sent through the gateway as
+  before. Mesh mode does not use peer views.
 - `counters.failures` and each `byPeer[..].failures` hold at most 32 distinct codes; further codes count as `OTHER`.
 
 **Last run per mode (additive).** `metrics.mesh` and `metrics.gateway` above are unchanged. `metrics.lastRun` keeps
@@ -355,16 +370,21 @@ each mode's results over the whole time spent in it:
 "metrics": {"...": "mesh and gateway above",
   "lastRun": {
     "mesh": {"startedTs": 1792915100000, "endedTs": 1792915160000, "durationMs": 60000, "nodes": 5,
-             "openConnections": 20, "possibleLinks": 20, "messages": 1200, "p50Ms": 4, "p95Ms": 11,
+             "openConnections": 20, "possibleLinks": 20, "openPairs": 10, "possiblePairs": 10, "messages": 1200, "p50Ms": 4, "p95Ms": 11,
              "throughputPerSec": 20, "errorRate": 0.01, "detectMsAvg": 3050, "failures": {"NO_LISTENER": 12}},
     "gateway": {"startedTs": 1792915160000, "endedTs": null, "...": "same fields, run in progress"}}}
 ```
 
 - A run starts on `POST /api/reset` (for the reset mode) and on a successful mode switch (for the new mode); it
   replaces that mode's previous run. On a successful switch the old mode's run is frozen: `endedTs` set,
-  `nodes`/`openConnections`/`possibleLinks` as they were when the switch started. A failed switch freezes nothing.
-- While a mode is active its run is live: `endedTs: null`, duration and topology as of now. A mode never run is
-  `null`. Reset clears both.
+  `nodes`/`openConnections`/`possibleLinks`/`openPairs`/`possiblePairs` as they were when the switch started. A
+  failed switch freezes nothing.
+- A finished run with at least one message is not replaced by an empty one: after a switch into that mode the old
+  run stays in `lastRun` (still with its `endedTs`) until the first message or detection in the mode. The new run
+  then starts with `startedTs` = the time of the switch. A mode whose last run is `null` or has no messages starts
+  its new run right away.
+- While a mode's current run is active it is live: `endedTs: null`, duration and topology as of now. A mode never
+  run is `null`. Reset clears both.
 - `messages`, `errorRate`, `throughputPerSec` (messages / duration) and `failures` (one code per failed send, the
   first failed code for a broadcast) cover the whole run. `p50Ms`/`p95Ms` come from a uniform reservoir sample of
   at most 2000 latencies per run. `detectMsAvg` averages the run's detections, `null` if none.
@@ -410,7 +430,10 @@ Agreed in `#build`. The exact bodies are to be confirmed against `projects/pisak
 - **Deregister:** `POST /t/pisak/api/deregister` with `{"nodeId": "n1"}` and the same `Authorization` header, when
   leaving gateway mode or when the node is stopped.
 - **Failures:**
-  - A `401` from route makes the node register again once, then retry the message once.
+  - A `401` from route makes the node register again once, then retry the message once. At most one registration
+    per node is in flight: sends that hit `401` together share it. A send whose token was already replaced by a
+    newer registration does not register again; it retries with the current token. So a gateway that issues a new
+    token on every register does not turn a gateway restart into `REJECTED` (`auth`) errors.
   - A node in gateway mode that gets no gateway probe for 3 × `probeIntervalMs` (from the register answer, default
     1000) registers again. This covers a gateway restart, which forgets every registration.
   - A failed register: see the mode switch in section 4.
@@ -451,3 +474,18 @@ Events and the Dashboard show the name instead of the number.
 - **Chaos:** new actions `restart` and `skew`.
 - **Breaking, state:** `connections` is replaced by `possibleLinks` and `openConnections`.
 - **Breaking, events:** events use the shared shape. `kind` is now `type`, and `error` is now `errorCode`.
+
+## Additive changes after 0.2
+
+Compatible with 0.2: no field is renamed or removed, and defaults are unchanged.
+
+- **detectMs in gateway mode** is measured from the kill to when our runtime sees the gateway's down report, the same
+  definition as mesh (section 5). Before, it copied the gateway's figure. The gateway's figure is on the `node.down`
+  event as `gatewayDetectMs`.
+- **Single-flight gateway registration** and a token-aware retry on `401` (section 6).
+- **Fast fail in gateway mode** when a fresh peer view says the destination is down or leaving: `NODE_UNAVAILABLE`,
+  `at: "node"` (section 5).
+- **Traffic `includeDown`** (opt-in) lets the generator target killed and restarting nodes (section 4). A node that
+  comes back in gateway mode is no longer remembered as reported down.
+- **lastRun** keeps a finished run with messages until the new run of that mode has traffic (section 5).
+- **`possiblePairs` / `openPairs`** in `/state` and in `lastRun` (section 5).
