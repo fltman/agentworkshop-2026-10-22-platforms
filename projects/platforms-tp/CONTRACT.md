@@ -23,7 +23,14 @@ The separate `scenario.detection` values are measured from each node-kill reques
 down. `scenario.baseline` records the five-node mesh stage before scaling, and `scenario.eventCursors` records the
 Farzad event sequence range collected for each demo step.
 
+`scenario.steps` contains seven stable project-demo step records with `id`, `title`, `status` (`pending`, `running`,
+`done`, or `failed`), `startedAt`, `completedAt`, and `metrics` (or `error` for a failed step). The `comparison` step
+metrics contain an objective `scenario.conclusion` with `lowerP95Mode`, `fewerConnectionsMode`,
+`fasterDetectionMode`, and `gatewayHaFailoverMs`; a mode field is `null` when the values are missing or tied.
+
 Example response:
+
+The `steps` array below shows its first entry; the runtime state includes all seven project-demo entries.
 
 ```json
 {
@@ -65,6 +72,17 @@ Example response:
     "results": { "mesh": null, "gateway": null },
     "baseline": null,
     "detection": { "mesh": null, "gateway": null },
+    "steps": [
+      {
+        "id": "start-mesh",
+        "title": "Start five nodes in mesh mode",
+        "status": "pending",
+        "startedAt": null,
+        "completedAt": null,
+        "metrics": null
+      }
+    ],
+    "conclusion": null,
     "eventCursors": {}
   }
 }

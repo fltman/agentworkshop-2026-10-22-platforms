@@ -352,6 +352,8 @@ test('starting a demo reports upstream failure and unlocks controls', async () =
   assert.equal(state.running, false);
   assert.match(state.scenario.step, /Demo paused/);
   assert.match(state.liveError, /gateway unavailable/);
+  assert.equal(state.scenario.steps[0].status, 'failed');
+  assert.match(state.scenario.steps[0].error, /gateway unavailable/);
 });
 
 test('live demo runs the same node-failure scenario in mesh and gateway modes', async () => {
@@ -466,6 +468,21 @@ test('live demo runs the same node-failure scenario in mesh and gateway modes', 
   const state = JSON.parse(fs.readFileSync(path.join(dataDir, 'platforms-tp.state.json'), 'utf8'));
   assert.equal(state.running, false);
   assert.equal(state.scenario.step, 'Demo complete');
+  assert.deepEqual(state.scenario.steps.map(step => step.id), [
+    'start-mesh',
+    'mesh-traffic',
+    'scale-mesh',
+    'mesh-failure',
+    'gateway-replay',
+    'gateway-ha',
+    'comparison',
+  ]);
+  assert.ok(state.scenario.steps.every(step => step.status === 'done'));
+  assert.equal(state.scenario.steps[2].metrics.nodeCount, 15);
+  assert.notEqual(state.scenario.steps[3].metrics.detectionMs, null);
+  assert.notEqual(state.scenario.steps[4].metrics.detectionMs, null);
+  assert.equal(state.scenario.conclusion.lowerP95Mode, 'mesh');
+  assert.equal(state.scenario.conclusion.fewerConnectionsMode, 'gateway');
   assert.equal(state.mode, 'gateway');
   assert.equal(state.source, 'live');
   assert.equal(state.scenario.baseline.nodeCount, 5);
@@ -504,4 +521,29 @@ test('manual controls are rejected while a persisted demo is running', async () 
   const result = await control('toggle-mode');
   assert.equal(result.status, 409);
   assert.match(result.body.error, /locked while the demo is running/);
+});
+
+test('plugin restart fails the in-progress demo step visibly', () => {
+  fs.writeFileSync(path.join(dataDir, 'platforms-tp.state.json'), JSON.stringify({
+    running: true,
+    scenario: {
+      runId: 'interrupted-run',
+      steps: [{
+        id: 'gateway-replay',
+        title: 'Repeat traffic and node failure in gateway mode',
+        status: 'running',
+        startedAt: '2026-10-22T10:50:00.000Z',
+        completedAt: null,
+        metrics: null,
+      }],
+    },
+  }));
+
+  plugin.init({ dataDir });
+  const state = JSON.parse(fs.readFileSync(path.join(dataDir, 'platforms-tp.state.json'), 'utf8'));
+  assert.equal(state.running, false);
+  assert.equal(state.scenario.step, 'Demo interrupted by restart');
+  assert.equal(state.scenario.steps[0].status, 'failed');
+  assert.match(state.scenario.steps[0].error, /interrupted by restart/);
+  assert.ok(Number.isFinite(Date.parse(state.scenario.steps[0].completedAt)));
 });

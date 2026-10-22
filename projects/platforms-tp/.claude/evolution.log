@@ -8,3 +8,6 @@
 2026-10-22 12:31 SPLIT: node-api-integration → node-api-contracts + scenario-orchestration (energy 90; API contract integration and demo sequencing became distinct recurring concerns)
 2026-10-22 12:35 MUTATE: node-api-contracts (energy 45→55 after validating Farzad's merged contract and integrating API fixes)
 2026-10-22 12:35 MUTATE: scenario-orchestration (energy 45→55 after implementing and testing the audited demo sequence)
+2026-10-22 12:38 SPAWN: demo-readiness (need: verify cross-team readiness before the joint live demo and dry run)
+2026-10-22 12:52 MUTATE: demo-readiness (energy 50→60; require a release/deploy pause as well as a POST freeze after a live demo was interrupted by server restart)
+2026-10-22 12:57 MUTATE: scenario-orchestration (energy 55→65 after PR #27 added seven-step progress and visible restart failures)

@@ -28,6 +28,8 @@ Use Farzad's `metrics.lastRun` for end-to-end per-mode comparisons, retain stabl
 
 Keep scenario operations single-controller during a shared live demo. Stop traffic on completion, preserve the final mode, and report failures without masking them with synthetic results.
 
+For A/B detection comparisons, use the same start and end events in both modes and poll more frequently while detection is pending; retain gateway probe-based detection separately as a labelled diagnostic (from spore platforms-22, team farzad).
+
 ## Self-Modification Protocol
 
 Repeated work on transport, loopback policy, or API response shape belongs to `node-api-contracts`; if both concerns consistently activate together, propose a merge with evidence.
@@ -42,3 +44,4 @@ This capability does NOT handle:
 
 - 2026-10-22: Split from `node-api-integration` at energy 90 to isolate scenario sequencing and measurement.
 - 2026-10-22: Energy increased from 45 to 55 after implementing and testing the audited live demo sequence.
+- 2026-10-22: Energy increased from 55 to 65 after PR #27 added the read-only seven-step progress contract and restart-visible failures.
