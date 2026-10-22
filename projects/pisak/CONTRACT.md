@@ -1,6 +1,6 @@
 # Gateway contract (module B, team pisak)
 
-Status: **v0.3, implemented** in `board/plugins/pisak/` (tests: `projects/pisak/test/gateway.test.mjs`). Comments and
+Status: **v0.4, implemented** in `board/plugins/pisak/` (tests: `projects/pisak/test/gateway.test.mjs`). Comments and
 change requests go to `@pisak` in `#build`. Only pisak changes this file, and every change is announced in `#build`
 before it ships.
 
@@ -58,6 +58,14 @@ requests in `#build`.
 - `/state` has per-node `status` (`up` | `slow` | `down`), `circuit` and `links`. Metric names are `p50Ms`, `p95Ms`,
   `throughputPerSec`, `errorRate` and `detectMs`, the same as farzad's.
 
+## Changes in v0.4 (review by farzad)
+
+- The gateway never follows redirects, for deliveries or for probes. A node that answers 3xx gets `503
+  NODE_UNAVAILABLE` with `reason: "bad_response"` (not retried), and a 3xx heartbeat answer is a failed probe.
+- `ttlMs` has a floor of 50 ms.
+- A `TIMEOUT` caused by a sender's short `ttlMs` (below `defaultTtlMs`) does not count toward the receiver's circuit
+  breaker and is not used for its `slow` status.
+
 ## 1. Message envelope
 
 **Owned by farzad.** It is mirrored here for reference only; `projects/farzad/CONTRACT.md` section 1 wins if the two
@@ -84,7 +92,8 @@ differ.
   that has `destination.appId` (or to every node, for `"*"`), except the sender. Nodes registered as `external` are
   only included with `scope: "all"`.
 - `correlationId`: a response carries the request's `messageId`.
-- `ttlMs`: the total time the gateway may spend on the message, retries included.
+- `ttlMs`: the total time the gateway may spend on the message, retries included. Values below 50 are raised to 50,
+  values above 60000 are lowered to 60000.
 - Size: at most 65536 bytes of JSON, otherwise `413 MESSAGE_TOO_LARGE`.
 
 ## 2. Error format and codes
@@ -101,7 +110,7 @@ for every error the gateway makes itself.
 | `UNKNOWN_NODE`      | 404       | the destination nodeId is not registered                                               |
 | `UNKNOWN_APP`       | 404       | the node is registered but does not have that appId                                    |
 | `TIMEOUT`           | 504       | no answer within `ttlMs`, retries included                                             |
-| `NODE_UNAVAILABLE`  | 503       | `reason` is `"node_down"` (failed probes), `"circuit_open"`, `"unreachable"`, `"bad_response"` (the node answered without a NodeLink error), or `"gateway_down"` (the gateway is killed) |
+| `NODE_UNAVAILABLE`  | 503       | `reason` is `"node_down"` (failed probes), `"circuit_open"`, `"unreachable"`, `"bad_response"` (the node answered without a NodeLink error, or with a redirect: the gateway never follows a 3xx), or `"gateway_down"` (the gateway is killed) |
 | `REJECTED`          | 401 / 429 | `reason` is `"auth"` (401: missing token, bad token, or a token that is not the sender's) or `"rate_limit"` (429, with a `Retry-After` header) |
 | `MESSAGE_TOO_LARGE` | 413       | the envelope is larger than 65536 bytes                                                |
 | `BAD_PROTOCOL`      | 400       | invalid envelope or body, wrong `proto`, or unsupported `version`                       |
@@ -199,7 +208,7 @@ All of these can be changed at runtime with `config` (section 7).
 |-------------------|---------|---------------------------------------------------------------------------------|
 | `defaultTtlMs`    | 2000    | used when the envelope has no `ttlMs`                                           |
 | `retries`         | 2       | extra attempts after a network error or a 503, with backoff (100 ms, then 200 ms), all inside `ttlMs` |
-| `breakerFailures` | 5       | consecutive failures to a node before its circuit **opens**                     |
+| `breakerFailures` | 5       | consecutive failures to a node before its circuit **opens**. A `TIMEOUT` only counts when the sender's `ttlMs` was at least `defaultTtlMs`: a short sender budget is not the node's fault |
 | `breakerOpenMs`   | 5000    | time in open state before one **half-open** trial message                       |
 | `rateLimitPerSec` | 50      | token bucket per source node                                                    |
 | `rateLimitBurst`  | 100     | bucket size                                                                     |
