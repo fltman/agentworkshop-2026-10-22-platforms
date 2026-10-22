@@ -64,6 +64,6 @@ $DATABLOCK        handle {
 CADDY
     systemctl reload caddy
   fi
-  sleep 1; curl -s localhost:$PORT/api/health"
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do sleep 1; curl -sf localhost:$PORT/api/health && exit 0; done; echo 'the server did not answer on /api/health within 15 s' >&2; exit 1"
 echo
 echo "Done: $HOST"

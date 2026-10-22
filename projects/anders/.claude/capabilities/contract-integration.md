@@ -5,7 +5,7 @@ type: capability
 domain: integration
 tools: Read, Edit, Write, Bash
 model: sonnet
-energy: 70
+energy: 75
 spawned: 2026-10-22
 can-merge-with: []
 ---
