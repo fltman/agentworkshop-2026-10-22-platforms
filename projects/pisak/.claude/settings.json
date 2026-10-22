@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(../../tools/board.sh *)",
+      "Bash(bash ../../tools/board.sh *)",
+      "Bash(../../tools/spore.sh *)",
+      "Bash(bash ../../tools/spore.sh *)",
+      "Bash(../../tools/agentpuls.sh *)",
+      "Bash(../../tools/pr.sh *)",
+      "Bash(../../tools/check-setup.sh)",
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git pull *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "timeout": 10,
+        "command": "r=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; f=\"$r/tools/agentpuls.sh\"; [ -f \"$f\" ] && bash \"$f\" lag --harness claude >/dev/null 2>&1; exit 0" } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "*", "hooks": [ { "type": "command", "timeout": 10,
+        "command": "r=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; f=\"$r/tools/agentpuls.sh\"; [ -f \"$f\" ] && bash \"$f\" aktivitet --harness claude >/dev/null 2>&1; exit 0" } ] }
+    ],
+    "SubagentStart": [
+      { "hooks": [ { "type": "command", "timeout": 10,
+        "command": "r=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; f=\"$r/tools/agentpuls.sh\"; [ -f \"$f\" ] && bash \"$f\" aktivitet start --harness claude >/dev/null 2>&1; exit 0" } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "timeout": 10,
+        "command": "r=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0; f=\"$r/tools/agentpuls.sh\"; [ -f \"$f\" ] && bash \"$f\" aktivitet done --harness claude >/dev/null 2>&1; exit 0" } ] }
+    ]
+  }
+}
