@@ -35,6 +35,8 @@ Keep proxied paths fixed to contract-approved endpoints. Never forward a caller-
 
 For A/B mode comparisons, retain a frozen per-mode run result alongside rolling live metrics; the rolling window empties after a mode switch (from spore platforms-12, team farzad).
 
+After HA promotion, verify service recovery and allow the new active to establish fresh liveness before treating nodes as failed; only the intentionally killed demo node may remain down (from spore platforms-14, team pisak).
+
 ## Self-Modification Protocol
 
 If integration work repeatedly expands into scenario sequencing, suggest merging with control-orchestrator. If transport and contract normalization become distinct recurring concerns, suggest splitting this capability.

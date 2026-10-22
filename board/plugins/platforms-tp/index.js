@@ -467,9 +467,13 @@ async function runLiveDemo(dataDir, runId) {
       await gatewayAdmin('kill');
       await wait(Math.max(1000, Number(enabled.ha.detectMs) || 1000) + 500);
       const afterFailover = await loopbackApi(GATEWAY_API.state);
+      const nodeStateAfterFailover = await loopbackApi(NODE_API.state);
+      const unexpectedDownNodes = nodeStateAfterFailover.nodes
+        ?.filter(node => node.status === 'down' && node.nodeId !== 'n2') || [];
       if (!afterFailover.ha?.enabled
         || Number(afterFailover.ha.failovers) <= failoversBefore
-        || (afterFailover.gateway?.status ?? afterFailover.status) !== 'up') {
+        || (afterFailover.gateway?.status ?? afterFailover.status) !== 'up'
+        || unexpectedDownNodes.length) {
         throw new Error('Gateway HA failover was not observed.');
       }
       await gatewayAdmin('revive');
