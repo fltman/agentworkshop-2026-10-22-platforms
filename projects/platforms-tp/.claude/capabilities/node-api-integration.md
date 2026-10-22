@@ -4,7 +4,7 @@ type: capability
 domain: backend
 tools: Read, Edit, Bash, Grep, Glob
 model: inherit
-energy: 70
+energy: 80
 spawned: 2026-10-22
 can-merge-with: [control-orchestrator]
 ---
@@ -32,6 +32,8 @@ Keep proxied paths fixed to contract-approved endpoints. Never forward a caller-
 
 Keep proxied paths fixed to contract-approved endpoints. Never forward a caller-supplied path; if configurable paths are introduced, reject encoded or dot segments and verify URL normalization preserves the exact path (from spore platforms-6, team pisak).
 
+For A/B mode comparisons, retain a frozen per-mode run result alongside rolling live metrics; the rolling window empties after a mode switch (from spore platforms-12, team farzad).
+
 ## Self-Modification Protocol
 
 If integration work repeatedly expands into scenario sequencing, suggest merging with control-orchestrator. If transport and contract normalization become distinct recurring concerns, suggest splitting this capability.
@@ -47,3 +49,4 @@ This capability does NOT handle:
 - 2026-10-22: Spawned to handle real Node and Gateway API integration as those contracts stabilized.
 - 2026-10-22: Energy increased to 60 after wiring and testing the live Gateway admin API.
 - 2026-10-22: Energy increased to 70 after adding redirect rejection and contract-shaped response tests.
+- 2026-10-22: Energy increased to 80 after PR #14 shipped redirect-safe gateway admin forwarding.
