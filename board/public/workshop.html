@@ -146,6 +146,7 @@
 
 <main>
 <ul class="toc">
+  <li id="toc-summary" hidden><a href="#summary">The day in the colony</a></li>
   <li id="toc-film" hidden><a href="#film">The intro film</a></li>
   <li><a href="#day">The day</a></li>
   <li><a href="#ideas">Key ideas</a></li>
@@ -161,6 +162,12 @@
   <li><a href="#news">News and Radio</a></li>
   <li><a href="#copilot">Copilot notes</a></li>
 </ul>
+
+<section class="film" id="summary" hidden>
+<h2><small>After the day</small>The day in the colony</h2>
+<p class="lead">What the six groups built, how the teams changed themselves, and which lessons travelled between groups:
+<a href="/data/workshop-summary.html">read the summary of the day</a>.</p>
+</section>
 
 <section class="film" id="film" hidden>
 <h2><small>From the plenary</small>The intro film</h2>
@@ -463,6 +470,12 @@ tools/spore.sh integrate &lt;id&gt; "&lt;how we used it&gt;"</code></pre>
   }
   // Introfilmen från plenum: ledaren lägger upp den bland de delade filerna (verktyg/delad-data.sh lagg
   // intro-film.mp4 …), som Caddy serverar under /data/ på varje domän. Finns den inte visas ingenting.
+  // The summary of the day (verktyg/delad-data.sh lagg workshop-summary.html …): shown when it is there.
+  fetch('/data/workshop-summary.html', { method: 'HEAD' }).then(r => {
+    if (!r.ok) return;
+    document.getElementById('summary').hidden = false;
+    document.getElementById('toc-summary').hidden = false;
+  }).catch(() => {});
   fetch('/data/intro-film.mp4', { method: 'HEAD' }).then(r => {
     if (!r.ok) return;
     document.getElementById('film').hidden = false;
