@@ -4,7 +4,7 @@ type: capability
 domain: backend
 tools: Read, Edit, Bash, Grep, Glob
 model: inherit
-energy: 80
+energy: 90
 spawned: 2026-10-22
 can-merge-with: [control-orchestrator]
 ---
@@ -13,12 +13,13 @@ can-merge-with: [control-orchestrator]
 
 ## What This Enables
 
-Connects the platforms-tp control plane to the Node and Gateway team APIs. Keeps scenario controls, real runtime state, and dashboard-facing metrics aligned with the teams' published contracts.
+Connects the platforms-tp control plane to the Node and Gateway APIs and sequences live mesh/gateway demos. Keeps scenario controls, runtime state, comparison snapshots, and dashboard-facing metrics aligned with the teams' published contracts.
 
 ## Activation Triggers
 
 This capability activates when:
 - A control action must call the Node or Gateway module instead of changing simulated state.
+- A scripted scenario must coordinate live resets, scale, traffic, chaos, mode switches, gateway recovery, and optional HA failover.
 - Cross-module API contracts change or need compatibility verification.
 - Integration tests need to validate real responses and error handling.
 
@@ -50,3 +51,4 @@ This capability does NOT handle:
 - 2026-10-22: Energy increased to 60 after wiring and testing the live Gateway admin API.
 - 2026-10-22: Energy increased to 70 after adding redirect rejection and contract-shaped response tests.
 - 2026-10-22: Energy increased to 80 after PR #14 shipped redirect-safe gateway admin forwarding.
+- 2026-10-22: Energy increased to 90 after PR #17 added the tested live comparison and optional HA scenario sequence.
