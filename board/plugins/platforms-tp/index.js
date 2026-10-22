@@ -237,6 +237,7 @@ function syncNodeState(state, nodeState) {
     const lastRun = nodeState.metrics?.lastRun?.[modeName];
     if (lastRun && typeof lastRun === 'object') {
       state.scenario.results[modeName] = {
+        ...state.scenario.results[modeName],
         throughput: Number(lastRun.throughput ?? lastRun.throughputPerSec) || 0,
         latencyP50: Number(lastRun.p50 ?? lastRun.p50Ms) || 0,
         latencyP95: Number(lastRun.p95 ?? lastRun.p95Ms) || 0,
