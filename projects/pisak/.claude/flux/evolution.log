@@ -6,3 +6,5 @@
 2026-10-22 11:15 EXPLORE: c1f74c17 "gateway must not trust peers or senders" (2 timelines: α call-site guards + budget-aware breaker, β one safeFetch policy layer; second problem of this kind after path traversal)
 2026-10-22 11:20 SELECT: c1f74c17-α wins (fitness 86 vs β 20, redirect manual + 50 ms ttl floor + budget-aware breaker, 15/15 tests), β to the graveyard (revive if a third outbound call appears)
 2026-10-22 11:50 MUTATE: c1f74c17-α gen-002 gains observability 0.5 (probe body carries peers membership, farzad's request; contract v0.5 additive, 16/16 tests)
+2026-10-22 11:55 EXPLORE: 21e3687b "gateway HA pair" (3 timelines: α active/standby behind one URL with replication, β client-side failover over two URLs, γ active-active on a shared registry)
+2026-10-22 11:57 SELECT: 21e3687b-α wins (fitness 87 vs β 25, γ 15, active/standby pair behind one URL, contract v0.6, 19/19 tests), β and γ to the graveyard

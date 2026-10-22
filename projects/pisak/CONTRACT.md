@@ -1,6 +1,6 @@
 # Gateway contract (module B, team pisak)
 
-Status: **v0.5, implemented** in `board/plugins/pisak/` (tests: `projects/pisak/test/gateway.test.mjs`). Comments and
+Status: **v0.6, implemented** in `board/plugins/pisak/` (tests: `projects/pisak/test/gateway.test.mjs`). Comments and
 change requests go to `@pisak` in `#build`. Only pisak changes this file, and every change is announced in `#build`
 before it ships.
 
@@ -57,6 +57,14 @@ requests in `#build`.
   `ok`, `latencyMs`, `errorCode`. The polling answer is `{seq, events}`, the same as farzad's.
 - `/state` has per-node `status` (`up` | `slow` | `down`), `circuit` and `links`. Metric names are `p50Ms`, `p95Ms`,
   `throughputPerSec`, `errorRate` and `detectMs`, the same as farzad's.
+
+## Changes in v0.6 (HA pair, demo step 6)
+
+- Additive, off by default: an HA pair of gateway instances behind the same base URL (section 9). With HA off,
+  nothing changes: `kill` takes the gateway down and nodes register again after `revive`.
+- New admin action `ha` (`{ "enabled": true, "detectMs": 1000 }`). `kill` and `revive` take an optional `instance`.
+- `/state` gains an `ha` block. New events: `gateway-failover`, `ha-enabled`, `ha-disabled`.
+- `gateway.id` in `/state` is the active instance (`a` or `b`) and may change on a failover.
 
 ## Changes in v0.5 (requested by farzad)
 
@@ -311,6 +319,8 @@ don't apply. In a `message` event, `type` is the message type (`request`, `onewa
 - `circuit-open`, `circuit-half-open`, `circuit-closed` (`to` is the node)
 - `rate-limited` (`from` is the node)
 - `gateway-killed`, `gateway-revived`, `config-changed`
+- `gateway-failover` (`from` / `to` are instance ids, plus `failoverMs` and `nodes`), `ha-enabled` (with
+  `detectMs`), `ha-disabled` (section 9)
 
 ### POST `/admin`
 
@@ -318,10 +328,11 @@ Chaos and configuration, for Control. The body is `{ "action": "<action>", ... }
 
 | action   | body                           | effect                                                                    |
 |----------|--------------------------------|---------------------------------------------------------------------------|
-| `kill`   | –                              | the gateway goes `down`: every node-facing call answers `503 NODE_UNAVAILABLE` with `reason: "gateway_down"` |
-| `revive` | –                              | the gateway is `up` again. Registrations are lost, so nodes must register again |
+| `kill`   | `{ "instance"?: "a" \| "b" }`   | the gateway (default: the active instance) goes `down`: every node-facing call answers `503 NODE_UNAVAILABLE` with `reason: "gateway_down"` |
+| `revive` | `{ "instance"?: "a" \| "b" }`   | the gateway (default: the active instance, and the standby too when HA is on) is `up` again. Without HA, registrations are lost, so nodes must register again |
 | `config` | `{ "config": { ...partial } }` | changes the settings in section 6                                         |
-| `reset`  | –                              | clears nodes, metrics and events (between demo runs). It does **not** revive a killed gateway |
+| `reset`  | –                              | clears nodes, metrics and events (between demo runs). It does **not** revive a killed gateway, and it keeps the HA setting |
+| `ha`     | `{ "enabled": bool, "detectMs"?: 100..10000 }` | turns the HA pair on or off (section 9)                    |
 
 Answer: `200 { "ok": true, "state": <same as GET /state> }`. `GET /state`, `/metrics` and `/events` keep answering
 while the gateway is killed, so the dashboard can show it.
@@ -334,16 +345,38 @@ farzad owns the mode (`POST /t/farzad/api/mode`).
 - On leaving gateway mode, they `deregister`.
 - Control may call our `reset` before a gateway run, so it starts from zero metrics.
 
-## 9. Stretch: HA pair
+## 9. Stretch: HA pair (v0.6)
 
-There are two instances, `a` and `b`, at `/t/pisak/gw/a/api` and `/t/pisak/gw/b/api`. Each has the API above.
-`/t/pisak/api` is an alias for the currently active instance.
+There are two gateway instances, `a` and `b`, in an active/standby pair behind the **same** base URL
+`/t/pisak/api`. Nodes need no change: they keep one URL and one token.
 
-- The two instances share their registry, so a failover keeps registrations and tokens.
-- Nodes that get `503` with `reason: "gateway_down"` retry against the other instance.
-- `kill` and `revive` take `{ "instance": "a" | "b" }`.
+- **Off by default.** Only `a` runs, and `b` is `off`. A `kill` takes the gateway down until `revive`.
+- **Turn it on:** `POST /admin {"action":"ha","enabled":true,"detectMs":1000}`. The standby starts and receives a
+  copy of the active registry (nodes, apps, delivery URLs and tokens) every 250 ms. If the active is already dead,
+  the standby takes over at once with an empty registry (this is not counted as a failover).
+- **Failover:** when the active is killed, node-facing calls answer `503 gateway_down` until `detectMs` has passed.
+  Then the standby becomes active with the replicated registry: the same tokens work, and nobody registers again.
+  Registrations from the last 250 ms before the kill may be missing. Such a node gets `401` and registers again, as
+  it would after any restart.
+- **Not replicated:** circuit breakers, rate-limit buckets, in-flight requests and latency samples. The new active
+  starts them fresh and probes every node itself. Events and metrics are shared, so the dashboard sees one stream.
+- **Fail back:** `revive` brings the dead instance back as the standby, resynced from the active.
+  `kill {"instance":"b"}` then fails over again. Killing the standby only removes the protection.
+- **Turn it off:** `{"action":"ha","enabled":false}` stops the standby. If the active was dead, the running standby
+  stays on as the only instance.
 
-This is to be confirmed with farzad before we build it.
+`/state` (and every admin answer) carries:
+
+```json
+"ha": { "enabled": true, "active": "b", "detectMs": 1000, "failovers": 1, "lastFailoverMs": 1012,
+        "lastFailoverAt": 1792915260000,
+        "instances": [ { "id": "a", "status": "down", "role": "standby", "nodes": 0 },
+                       { "id": "b", "status": "up", "role": "active", "nodes": 4 } ] }
+```
+
+`role` is `active` | `standby` | `off`. For the demo (step 6): run gateway mode, `kill`, and the dashboard shows
+every node unreachable. Then `revive`, `ha` on, and `kill` again: after about `detectMs` traffic flows again, and
+`lastFailoverMs` is the number to compare with the time a mesh needs to detect the same failure.
 
 ## 10. Example: one request in gateway mode
 

@@ -46,14 +46,16 @@ function safeEqual(a, b) {
 }
 
 class Gateway {
-  constructor(id = 'a') {
+  // `shared` lets an HA pair use one event stream and one metrics window, so cursors survive a failover.
+  constructor(id = 'a', shared = {}) {
     this.id = id;
     this.config = { ...DEFAULTS };
     this.nodes = new Map();
-    this.events = new Events();
-    this.metrics = new Metrics();
+    this.events = shared.events || new Events();
+    this.metrics = shared.metrics || new Metrics();
     this.status = 'up';
     this.startedAt = Date.now();
+    this.killedAt = 0;
     this.routes = 0; // authenticated route calls since the process started; admin reset does not clear it
     // Loopback to the board's own port (spore backend-4): never derived from the Host header. Without PORT, index.js
     // learns it from the first request's local port.
@@ -88,18 +90,42 @@ class Gateway {
     if (!this.nodes.has(nodeId) && this.nodes.size >= MAX_NODES) return badRequest(`registry full (${MAX_NODES} nodes)`);
 
     const now = Date.now();
-    const node = {
+    const node = this.makeNode({
       nodeId, apps: [...new Set(apps)], deliverUrl, heartbeatUrl, external: body.external === true,
-      token: 'gw-tok-' + crypto.randomBytes(16).toString('hex'),
-      status: 'up', slow: false, graceUntil: 0, leaving: false,
-      lastSeen: now, lastProbeAt: 0, probing: false, probeFailures: 0, probeSeq: 0,
-      breaker: { state: 'closed', failures: 0, openedAt: 0, trial: false },
-      bucket: { tokens: this.config.rateLimitBurst, last: now }, lastRateEvent: 0,
-      recent: [], inFlight: 0, registeredAt: now,
-    };
+      token: 'gw-tok-' + crypto.randomBytes(16).toString('hex'), registeredAt: now,
+    }, now);
     this.nodes.set(nodeId, node);
     this.events.emit('node-registered', { from: nodeId, to: 'gateway', ok: true, nodeId, apps: node.apps, external: node.external });
     return { status: 200, body: { token: node.token, probeIntervalMs: this.config.probeIntervalMs, probeTimeoutMs: this.config.probeTimeoutMs } };
+  }
+
+  makeNode(id, now) {
+    return {
+      ...id, status: 'up', slow: false, graceUntil: 0, leaving: false,
+      lastSeen: now, lastProbeAt: 0, probing: false, probeFailures: 0, probeSeq: 0,
+      breaker: { state: 'closed', failures: 0, openedAt: 0, trial: false },
+      bucket: { tokens: this.config.rateLimitBurst, last: now }, lastRateEvent: 0,
+      recent: [], inFlight: 0,
+    };
+  }
+
+  // ---------- HA replication (used by ha.js) ----------
+
+  // What a standby needs to take over without re-registration: identity, token and planned state.
+  snapshot() {
+    return [...this.nodes.values()].map(n => ({
+      nodeId: n.nodeId, apps: n.apps, deliverUrl: n.deliverUrl, heartbeatUrl: n.heartbeatUrl, external: n.external,
+      token: n.token, registeredAt: n.registeredAt, graceUntil: n.graceUntil, leaving: n.leaving, probeSeq: n.probeSeq,
+    }));
+  }
+
+  // Every restored node counts as just seen: the new active's own probes decide who is down.
+  restore(list) {
+    const now = Date.now();
+    this.nodes = new Map(list.map(s => {
+      const { graceUntil, leaving, probeSeq, ...id } = s;
+      return [s.nodeId, Object.assign(this.makeNode(id, now), { graceUntil, leaving, probeSeq })];
+    }));
   }
 
   // Returns the node when `req` carries the token of `nodeId`, otherwise a 401 result.
@@ -426,6 +452,7 @@ class Gateway {
     const action = body && body.action;
     if (action === 'kill') {
       this.status = 'down';
+      this.killedAt = Date.now();
       this.nodes.clear();
       this.events.emit('gateway-killed', { from: 'control', to: 'gateway', ok: false, gatewayId: this.id });
     } else if (action === 'revive') {

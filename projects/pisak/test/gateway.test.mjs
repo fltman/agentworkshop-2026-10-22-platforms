@@ -45,6 +45,7 @@ async function waitFor(fn, ms = 6000) {
   throw new Error('waitFor timed out');
 }
 async function fresh(config = {}) {
+  await admin({ action: 'ha', enabled: false });
   await admin({ action: 'revive' });
   await admin({ action: 'reset' });
   for (const id of ['n1', 'n2', 'n3', 'x1']) await chaos({ nodeId: id, killed: false, delayMs: 0, fail503: false, failWith: null, state: 'up', redirect: null });
@@ -405,4 +406,78 @@ test('v0.5: probes carry the gateway membership as peers', async () => {
   const probe = (await get('/t/fakenodes/probes')).body.n1;
   assert.equal(probe.from, 'gateway');
   assert.equal(probe.state, 'up');
+});
+
+const gwState = async () => (await get('/t/pisak/api/state')).body;
+
+test('v0.6: HA is off by default and a killed gateway stays down', async () => {
+  await fresh();
+  const t1 = await register('n1');
+  await register('n2');
+  let s = await gwState();
+  assert.equal(s.ha.enabled, false);
+  assert.deepEqual(s.ha.instances.map(i => i.role).sort(), ['active', 'off']);
+  await admin({ action: 'kill' });
+  await sleep(1300);
+  s = await gwState();
+  assert.equal(s.gateway.status, 'down', 'no failover without HA');
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1)).body.error.reason, 'gateway_down');
+  assert.equal((await admin({ action: 'kill', instance: s.ha.active === 'a' ? 'b' : 'a' })).status, 400, 'standby is not running');
+  assert.equal((await admin({ action: 'kill', instance: 'z' })).status, 400);
+  assert.equal((await admin({ action: 'ha' })).status, 400);
+  assert.equal((await admin({ action: 'ha', enabled: true, detectMs: 5 })).status, 400);
+});
+
+test('v0.6: HA pair fails over without re-registration and fails back', async () => {
+  await fresh({ probeIntervalMs: 200, probeTimeoutMs: 1000 });
+  const ha = await admin({ action: 'ha', enabled: true, detectMs: 300 });
+  assert.equal(ha.status, 200);
+  const first = ha.body.state.ha.active;
+  const second = first === 'a' ? 'b' : 'a';
+  assert.deepEqual(ha.body.state.ha.instances.map(i => i.status), ['up', 'up']);
+  const t1 = await register('n1');
+  await register('n2');
+  await sleep(400); // one replication tick
+  assert.equal((await gwState()).ha.instances.find(i => i.id === second).nodes, 2, 'registry replicated to the standby');
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1)).status, 200);
+  const since = (await get('/t/pisak/api/events?limit=1')).body.seq;
+
+  await admin({ action: 'kill' });
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1)).body.error.reason, 'gateway_down', 'down during detection');
+  const s = await waitFor(async () => { const v = await gwState(); return v.ha.active === second && v; }, 3000);
+  assert.equal(s.gateway.status, 'up');
+  assert.equal(s.ha.failovers >= 1, true);
+  assert.ok(s.ha.lastFailoverMs >= 300 && s.ha.lastFailoverMs < 1000, `failoverMs ${s.ha.lastFailoverMs}`);
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1)).status, 200, 'same token works on the new active');
+  const ev = (await get(`/t/pisak/api/events?since=${since}`)).body.events.find(e => e.kind === 'gateway-failover');
+  assert.equal(ev.from, first);
+  assert.equal(ev.to, second);
+  assert.equal(ev.nodes, 2);
+  await sleep(1300); // longer than probeTimeoutMs: the new active's own probes keep the nodes up
+  assert.ok((await gwState()).nodes.every(n => n.status === 'up'));
+
+  await admin({ action: 'revive' });
+  await sleep(400);
+  const back = await gwState();
+  assert.deepEqual(back.ha.instances.map(i => [i.id, i.status, i.nodes]), [['a', 'up', 2], ['b', 'up', 2]]);
+  assert.equal(back.ha.instances.find(i => i.id === first).role, 'standby');
+  await admin({ action: 'kill', instance: second });
+  await waitFor(async () => (await gwState()).ha.active === first, 3000);
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1)).status, 200, 'fail back keeps tokens too');
+  await admin({ action: 'revive' });
+});
+
+test('v0.6: enabling HA while the gateway is dead starts the standby as active', async () => {
+  await fresh();
+  const dead = (await admin({ action: 'kill' })).body.state.ha;
+  const r = await admin({ action: 'ha', enabled: true });
+  assert.equal(r.body.state.gateway.status, 'up');
+  assert.notEqual(r.body.state.ha.active, dead.active, 'the standby took over at once');
+  assert.equal(r.body.state.ha.failovers, dead.failovers, 'not counted as a failover');
+  await register('n1');
+  await admin({ action: 'ha', enabled: false });
+  const s = await gwState();
+  assert.equal(s.gateway.status, 'up', 'disabling HA keeps the running instance');
+  assert.equal(s.ha.instances.filter(i => i.role === 'off').length, 1);
+  await admin({ action: 'revive' });
 });
