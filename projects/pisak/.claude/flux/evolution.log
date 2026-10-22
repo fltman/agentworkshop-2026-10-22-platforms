@@ -2,3 +2,4 @@
 2026-10-22 10:13 EXPLORE: 508b820a "NodeLink gateway" (3 timelines: α sync push proxy + middleware pipeline, β mailbox queues with push+pull fallback, γ event-sourced log with projections and cheap HA)
 2026-10-22 10:30 TERMINATE: 508b820a-β at gen-001 (pull fallback made redundant: farzad agreed to gateway probes and nodes are same-origin)
 2026-10-22 10:30 EVOLVE: 508b820a α gen-002 (probe sweeper, contract v0.2, bold 0.5), γ gen-002 (probe events projected, methodical 0.6)
+2026-10-22 10:50 SELECT: 508b820a-α wins (fitness 80 vs γ 25, built and tested gateway plugin v0.3, PR #7), γ to the graveyard

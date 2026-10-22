@@ -302,7 +302,7 @@ Chaos and configuration, for Control. The body is `{ "action": "<action>", ... }
 | `kill`   | –                              | the gateway goes `down`: every node-facing call answers `503 NODE_UNAVAILABLE` with `reason: "gateway_down"` |
 | `revive` | –                              | the gateway is `up` again. Registrations are lost, so nodes must register again |
 | `config` | `{ "config": { ...partial } }` | changes the settings in section 6                                         |
-| `reset`  | –                              | clears nodes, metrics and events (between demo runs)                      |
+| `reset`  | –                              | clears nodes, metrics and events (between demo runs). It does **not** revive a killed gateway |
 
 Answer: `200 { "ok": true, "state": <same as GET /state> }`. `GET /state`, `/metrics` and `/events` keep answering
 while the gateway is killed, so the dashboard can show it.

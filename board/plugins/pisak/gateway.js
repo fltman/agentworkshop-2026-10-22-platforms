@@ -424,11 +424,11 @@ class Gateway {
       Object.assign(this.config, changed);
       this.events.emit('config-changed', { from: 'control', to: 'gateway', ok: true, config: changed });
     } else if (action === 'reset') {
+      // Not a revive: farzad calls reset before every gateway switch, and a killed gateway must still fail it.
       this.nodes.clear();
       this.metrics.reset();
       this.events.reset();
-      this.status = 'up';
-      this.startedAt = Date.now();
+      if (this.status === 'up') this.startedAt = Date.now();
     } else {
       return badRequest('action must be kill, revive, config or reset');
     }

@@ -45,6 +45,7 @@ async function waitFor(fn, ms = 6000) {
   throw new Error('waitFor timed out');
 }
 async function fresh(config = {}) {
+  await admin({ action: 'revive' });
   await admin({ action: 'reset' });
   for (const id of ['n1', 'n2', 'n3', 'x1']) await chaos({ nodeId: id, killed: false, delayMs: 0, fail503: false, failWith: null, state: 'up' });
   if (Object.keys(config).length) assert.equal((await admin({ action: 'config', config })).status, 200);
@@ -216,6 +217,8 @@ test('kill and revive the gateway', async () => {
   const r = await post('/t/pisak/api/route', env('n1', 'n2'), t1);
   assert.equal(r.status, 503);
   assert.equal(r.body.error.reason, 'gateway_down');
+  assert.equal((await post('/t/pisak/api/register', { nodeId: 'n1', apps: ['echo'], deliverUrl: '/t/fakenodes/n/n1/deliver' })).status, 503);
+  assert.equal((await admin({ action: 'reset' })).body.state.gateway.status, 'down', 'reset does not revive a killed gateway');
   assert.equal((await post('/t/pisak/api/register', { nodeId: 'n1', apps: ['echo'], deliverUrl: '/t/fakenodes/n/n1/deliver' })).status, 503);
   assert.equal((await admin({ action: 'revive' })).body.state.gateway.status, 'up');
   assert.equal((await post('/t/pisak/api/heartbeat', { nodeId: 'n1' }, t1)).status, 401, 'nodes re-register after revive');
