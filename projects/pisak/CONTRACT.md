@@ -1,6 +1,6 @@
 # Gateway contract (module B, team pisak)
 
-Status: **v0.4, implemented** in `board/plugins/pisak/` (tests: `projects/pisak/test/gateway.test.mjs`). Comments and
+Status: **v0.5, implemented** in `board/plugins/pisak/` (tests: `projects/pisak/test/gateway.test.mjs`). Comments and
 change requests go to `@pisak` in `#build`. Only pisak changes this file, and every change is announced in `#build`
 before it ships.
 
@@ -35,7 +35,7 @@ These align the gateway with farzad's Node contract v0.2. They were announced in
 - **Heartbeat and probes:**
   - The heartbeat body may name the node with `nodeId` or `from`.
   - `state: "restarting"` gives 10 s of grace. `"leaving"` is not a failure.
-  - Probes send `{from, seq, ts, state}` and read `state` from the answer.
+  - Probes send `{from, seq, ts, state, peers}` and read `state` from the answer.
 - **State:** adds `routes`, `possibleLinks`, `openConnections`, `maxMessageBytes`, `nodes[].external` and `links[].state`
   (`reachable` | `unreachable` | `restarting` | `disabled`). Node `status` adds `restarting` and `leaving`.
 - **Metrics:** the window is 10 s, the same as farzad's (was 60 s). `errors` has a key for every protocol code.
@@ -57,6 +57,12 @@ requests in `#build`.
   `ok`, `latencyMs`, `errorCode`. The polling answer is `{seq, events}`, the same as farzad's.
 - `/state` has per-node `status` (`up` | `slow` | `down`), `circuit` and `links`. Metric names are `p50Ms`, `p95Ms`,
   `throughputPerSec`, `errorRate` and `detectMs`, the same as farzad's.
+
+## Changes in v0.5 (requested by farzad)
+
+- Additive: every probe body carries `peers`, the gateway's view of every **other** registered node and its status
+  (`up` | `slow` | `down` | `restarting` | `leaving`), for example `{"n2":"up","n3":"down"}`. Nodes use it to keep
+  per-peer state in gateway mode. A node that does not know the field can ignore it.
 
 ## Changes in v0.4 (review by farzad)
 
@@ -191,7 +197,8 @@ The node answers as in farzad section 3: `200` with the response envelope for a 
 ## 5. Failure detection: the gateway probes the nodes
 
 Every `probeIntervalMs` (default 1000) the gateway sends `POST <heartbeatUrl>` with the body
-`{ "from": "gateway", "seq": <n>, "ts": <now>, "state": "up" }`, using farzad's heartbeat format. farzad agreed in
+`{ "from": "gateway", "seq": <n>, "ts": <now>, "state": "up", "peers": { "n2": "up", "n3": "down" } }`, using farzad's
+heartbeat format plus `peers` (v0.5: every other registered node with its `/state` status, never the node itself). farzad agreed in
 `#build` that nodes answer these probes in every mode, and that a killed node stays silent.
 
 - A node that answers no probe and sends no `/heartbeat` for `probeTimeoutMs` (default 3000) is marked `down`, unless

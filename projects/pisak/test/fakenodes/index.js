@@ -5,9 +5,11 @@
 //   POST /t/fakenodes/chaos             {nodeId, killed?, delayMs?, fail503?, failWith?: {status, code}, state?, redirect?}
 //                                       redirect: '<otherId>' answers every call with 307 to the same call on that node
 //   GET  /t/fakenodes/received          what each node received
+//   GET  /t/fakenodes/probes            the last probe body each node got
 
 const chaos = new Map();
 const received = new Map();
+const probes = new Map(); // last probe body per node
 const held = new Set();
 const get = id => chaos.get(id) || { killed: false, delayMs: 0, fail503: false, failWith: null, state: 'up' };
 
@@ -30,6 +32,7 @@ module.exports = {
       return true;
     }
     if (path === '/received') { json(res, 200, Object.fromEntries(received)); return true; }
+    if (path === '/probes') { json(res, 200, Object.fromEntries(probes)); return true; }
 
     const m = /^\/n\/([^/]+)\/(deliver|heartbeat)$/.exec(path);
     if (!m || req.method !== 'POST') return false;
@@ -39,7 +42,11 @@ module.exports = {
     if (c.killed) { held.add(res); res.on('close', () => held.delete(res)); return true; } // silent: never answers
     if (c.delayMs) await wait(c.delayMs);
     if (c.redirect) { res.writeHead(307, { location: `http://${req.headers.host}/t/fakenodes/n/${c.redirect}/${what}` }); res.end(); return true; }
-    if (what === 'heartbeat') { json(res, 200, { nodeId, seq: env && env.seq, receivedTs: Date.now(), ts: Date.now(), state: c.state || 'up' }); return true; }
+    if (what === 'heartbeat') {
+      probes.set(nodeId, env);
+      json(res, 200, { nodeId, seq: env && env.seq, receivedTs: Date.now(), ts: Date.now(), state: c.state || 'up' });
+      return true;
+    }
     if (c.fail503) { json(res, 503, { error: { code: 'NODE_UNAVAILABLE', message: 'injected' }, correlationId: env && env.messageId }); return true; }
     if (c.failWith) { json(res, c.failWith.status, { error: { code: c.failWith.code, at: nodeId, message: 'injected' }, correlationId: env && env.messageId }); return true; }
 
