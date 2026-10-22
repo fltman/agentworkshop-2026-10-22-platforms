@@ -5,7 +5,7 @@ type: capability
 domain: infra
 tools: Bash, Read
 model: haiku
-energy: 50
+energy: 35
 spawned: 2026-10-22
 can-merge-with: [contract-integration]
 ---

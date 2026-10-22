@@ -4,3 +4,12 @@
 2026-10-22 10:32 EVOLVE: 1c2d592a gen-001 mutated mid-flight (α, β both gained gateway-compat gene: accept kind node-down + admin reset, after pisak's real API landed)
 2026-10-22 10:46 CROSS: 1c2d592a α→β (MAX_NODES error code)
 2026-10-22 10:46 SELECT: 1c2d592a-β wins (23/23 tie with α; layered structure keeps contract changes local), α to the graveyard
+2026-10-22 11:01 EVOLVE: 1c2d592a-β gen-002 (testing 0.6->0.8, defensive 0.5->0.6; PR #8 live, coverage gaps and a restart bug found)
+2026-10-22 11:01 EXPLORE: 9ed445a3 "node inspector tile" (1 timeline, design chosen by proposal; α complete, feeds bugs back to 1c2d592a-β)
+2026-10-22 11:05 EVOLVE: 1c2d592a-β gen-003 (testing 0.8->0.9, defensive 0.6->0.7; 9 new checks found PEER_OVERLOADED and restart race bugs, 31/31 fake, 32/32 pisak)
+2026-10-22 11:05 SELECT: 9ed445a3-α wins (sole timeline, verified and embedded in the group app)
+2026-10-22 11:14 MUTATE: 9ed445a3-α tile drops chaos controls (anders and platforms-tp own controls; inspector stays read-only plus send console)
+2026-10-22 11:19 EVOLVE: 1c2d592a-β fitness confirmed 32/32 against pisak gateway v0.4 after PR #11 went live (no mutation needed)
+2026-10-22 11:25 MUTATE: 9ed445a3-α tile drops send console, gains node internals (cluster summary, per-node counters, queue, dedup, gateway registration, per-link misses); runtime 1c2d592a-β exposes them additively in /state
+2026-10-22 11:33 EVOLVE: 1c2d592a-β gen-004 (new gene observability 0.6, api-design 0.6->0.7; node internals in /state, 33/33 fake, 34/34 pisak)
+2026-10-22 11:33 EVOLVE: 9ed445a3-α gen-002 (focus 0.8, creative 0.5->0.4; tile shows only node internals nobody else has)

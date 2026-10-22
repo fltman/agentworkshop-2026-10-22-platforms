@@ -65,7 +65,8 @@ class Sender {
       state: 'pending', result: null, userData: body.userData === undefined ? null : body.userData, epoch: this.c.epoch,
     };
     if (!internal) this.store(rec);
-    const p = this.run(rec);
+    if (type === 'request') node.pending += 1;
+    const p = this.run(rec).finally(() => { if (type === 'request') node.pending -= 1; });
     if (body.async === true) {
       p.catch((e) => log(e && e.message));
       return { status: 202, body: { requestId: rec.requestId } };
@@ -89,6 +90,7 @@ class Sender {
       else {
         env.timestamp = node.now();
         rec.route = node.route;
+        node.countSent(env.type);
         core = await this.dispatch(node, env, deadline, signal);
       }
     }
@@ -106,6 +108,9 @@ class Sender {
     if (outcome === 'response') result.response = core.response;
     if (outcome === 'broadcast') { result.delivered = core.delivered; result.failed = core.failed; }
     result.error = core.error || null;
+    if (core.error) node.countFailure(core.error.code);
+    else if (core.failed) for (const f of core.failed) node.countFailure(f.code);
+    if (outcome === 'response') node.counters.received.response += 1;
     result.userData = rec.userData;
     const ok = !core.error && !(core.failed && core.failed.length);
     const mode = rec.route || node.route;
