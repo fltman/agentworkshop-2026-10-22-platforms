@@ -73,11 +73,27 @@
       .then(function (h) {
         clearTimeout(timer);
         if (!h || typeof h !== 'object') return;
-        var spara = { grupp: h.grupp || '', grupp_namn: h.grupp_namn || '', hub: !!h.hub, hub_url: h.hub_url || '' };
+        var spara = { grupp: h.grupp || '', grupp_namn: h.grupp_namn || '', hub: !!h.hub, hub_url: h.hub_url || '', summary: harSummary() };
         try { sessionStorage.setItem('tg-nav-health', JSON.stringify(spara)); } catch (e) {}
         rita(el, spara);
       })
       .catch(function () { clearTimeout(timer); });   // no health: the menu works without it
+    fetch('/data/workshop-summary.html', { method: 'HEAD', cache: 'no-store' })
+      .then(function (r) {
+        if (!r.ok) return;
+        var nu = null;
+        try { nu = JSON.parse(sessionStorage.getItem('tg-nav-health') || 'null'); } catch (e) {}
+        nu = nu || halsa || {};
+        nu.summary = true;
+        try { sessionStorage.setItem('tg-nav-health', JSON.stringify(nu)); } catch (e) {}
+        rita(el, nu);
+      })
+      .catch(function () {});
+  }
+
+  // Whether the summary check (below) has found the page in this tab; it can answer before or after /api/health.
+  function harSummary() {
+    try { return !!(JSON.parse(sessionStorage.getItem('tg-nav-health') || 'null') || {}).summary; } catch (e) { return false; }
   }
 
   function rita(el, h) {
@@ -91,6 +107,8 @@
       ['Radio', '/radio', /^\/radio(\.html)?$/],
       ['Workshop', '/workshop', /^\/workshop([./]|$)/]
     ];
+    // The summary of the day, once the lead has put it among the shared files (verktyg/delad-data.sh).
+    if (h.summary) punkter.push(['Summary', '/data/workshop-summary.html', /^\/data\/workshop-summary\.html$/]);
     if (hub) punkter.push(['All groups', '/', /^\/(hub(\.html)?)?$/, 'tg-hub']);
     else if (h.hub_url) punkter.push(['All groups', h.hub_url, null, 'tg-hub']);
 
