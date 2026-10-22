@@ -216,6 +216,9 @@ test('state reads live NodeLink metrics and labels them as live', async () => {
 });
 
 test('state imports Farzad frozen per-mode metrics using the published fields', async () => {
+  fs.writeFileSync(path.join(dataDir, 'platforms-tp.state.json'), JSON.stringify({
+    scenario: { results: { gateway: { gatewayMetrics: { routed: 81, retries: 2 } } } },
+  }));
   global.fetch = async url => {
     const target = new URL(url);
     if (target.pathname === '/t/farzad/api/state') {
@@ -230,6 +233,16 @@ test('state imports Farzad frozen per-mode metrics using the published fields', 
           openConnections: 20,
           nodes: 5,
           duration: 12000,
+        },
+        gateway: {
+          p50: 6,
+          p95: 11,
+          throughput: 18,
+          errorRate: 0.03,
+          detectMsAvg: 3000,
+          openConnections: 5,
+          nodes: 5,
+          duration: 11000,
         },
       };
       return responseWithJson(state);
@@ -251,6 +264,7 @@ test('state imports Farzad frozen per-mode metrics using the published fields', 
     capturedAt: result.body.scenario.results.mesh.capturedAt,
   });
   assert.ok(Number.isFinite(Date.parse(result.body.scenario.results.mesh.capturedAt)));
+  assert.deepEqual(result.body.scenario.results.gateway.gatewayMetrics, { routed: 81, retries: 2 });
 });
 
 test('state labels simulated metrics when the live Node API is unavailable', async () => {

@@ -322,6 +322,53 @@ Extra fields; nothing above is renamed or removed. All counters start at 0 on `P
   never. Gateway links have `misses: null` and `heartbeatAgeMs` from the last gateway contact.
 - `summary`: the same, summed over all nodes and links. `maxAbsOffsetMs` is `null` when no link has an offset.
 
+**Per peer and peer views (additive).**
+
+```json
+"counters": {"...": "totals above",
+  "byPeer": {"n2": {"sent": {"request": 2, "response": 0, "oneway": 1, "broadcast": 1},
+                    "received": {"request": 0, "response": 1, "oneway": 0, "broadcast": 0},
+                    "failures": {"NO_LISTENER": 1}}}},
+"links": [{"from": "n1", "to": "n2", "via": "gateway", "state": "unreachable", "peerStatus": "down",
+           "clockSync": null, "offsetMs": null,
+           "lastHeartbeatTs": 1792915200123, "misses": null, "heartbeatAgeMs": 640}],
+"summary": {"...": "fields above", "peerViews": {"reachable": 16, "unreachable": 4}}
+```
+
+- `counters.byPeer`: the same counters split by the other node, in both modes. Sent and failures go to the
+  destination (a broadcast: one per destination in `delivered` or `failed`); received to the envelope's
+  `source.nodeId`. Only peers with traffic have an entry, at most 64. The totals do not change.
+- `via` on a link: `mesh` for a mesh link, `gateway` for a peer view. Node-to-gateway links have no `via`.
+- **Peer views** (gateway mode only): each cluster node has one link per other node with `via: "gateway"`, taken
+  from the `peers` field of the gateway's probe (section 6). States map `up` and `slow` → `reachable`, `restarting` →
+  `restarting`, `down` → `unreachable`, `leaving` → `disabled`; `peerStatus` keeps the gateway's raw status (`null`
+  when `unknown`). `unknown` (outside the link-state machine) when the
+  gateway never sent `peers`, left the peer out of its latest probe, or the probes stopped for 3 × `probeIntervalMs`.
+  `lastHeartbeatTs` is the latest probe that named the peer. Peer views do not count in `possibleLinks`,
+  `openConnections` or `summary.linksByState`; `summary.peerViews` counts them by state. Sending does not use them.
+- `counters.failures` and each `byPeer[..].failures` hold at most 32 distinct codes; further codes count as `OTHER`.
+
+**Last run per mode (additive).** `metrics.mesh` and `metrics.gateway` above are unchanged. `metrics.lastRun` keeps
+each mode's results over the whole time spent in it:
+
+```json
+"metrics": {"...": "mesh and gateway above",
+  "lastRun": {
+    "mesh": {"startedTs": 1792915100000, "endedTs": 1792915160000, "durationMs": 60000, "nodes": 5,
+             "openConnections": 20, "possibleLinks": 20, "messages": 1200, "p50Ms": 4, "p95Ms": 11,
+             "throughputPerSec": 20, "errorRate": 0.01, "detectMsAvg": 3050, "failures": {"NO_LISTENER": 12}},
+    "gateway": {"startedTs": 1792915160000, "endedTs": null, "...": "same fields, run in progress"}}}
+```
+
+- A run starts on `POST /api/reset` (for the reset mode) and on a successful mode switch (for the new mode); it
+  replaces that mode's previous run. On a successful switch the old mode's run is frozen: `endedTs` set,
+  `nodes`/`openConnections`/`possibleLinks` as they were when the switch started. A failed switch freezes nothing.
+- While a mode is active its run is live: `endedTs: null`, duration and topology as of now. A mode never run is
+  `null`. Reset clears both.
+- `messages`, `errorRate`, `throughputPerSec` (messages / duration) and `failures` (one code per failed send, the
+  first failed code for a broadcast) cover the whole run. `p50Ms`/`p95Ms` come from a uniform reservoir sample of
+  at most 2000 latencies per run. `detectMsAvg` averages the run's detections, `null` if none.
+
 ### `GET /t/farzad/api/events?since=<seq>`
 
 Returns events with `seq` greater than `since` (exclusive), oldest first, at most 200.
@@ -369,6 +416,9 @@ Agreed in `#build`. The exact bodies are to be confirmed against `projects/pisak
   - A failed register: see the mode switch in section 4.
   - When the gateway does not answer, the node answers its sender with `NODE_UNAVAILABLE` and `at: "gateway"`.
   - A failed deregister is logged and ignored.
+- **Peers in the probe (additive):** the probe body may carry `"peers": {"n2": "up", "n3": "down", ...}` with
+  `up`, `slow`, `down`, `restarting` or `leaving` for the other nodes the gateway knows (pisak gateway v0.5). The node ignores its own id and
+  shows the rest as peer views (section 5). Without `peers`, the views are `unknown`.
 
 ## 7. Application message types
 

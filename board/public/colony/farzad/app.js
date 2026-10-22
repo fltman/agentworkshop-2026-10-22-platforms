@@ -5,6 +5,8 @@
   const POLL_MS = 1000;
   const STATES = ['reachable', 'initializing', 'restarting', 'unreachable', 'disabled'];
   const OOS_MARK = '\u00b1';
+  // Short marks for the gateway's raw peer status in a via-gateway cell.
+  const PEER_MARK = { up: '', slow: 's', down: 'd', restarting: 'r', leaving: 'l' };
 
   let state = null;
   let selected = null;
@@ -92,6 +94,8 @@
       ? states.map((st) => el('span', { title: st }, el('span', { cls: `sw s-${STATES.includes(st) ? st : 'unknown'}` }), el('b', { text: byState[st] }), ' '))
       : [el('span', { cls: 'hint', text: 'none' })];
     const cs = obj(sum.clockSync);
+    const pv = obj(sum.peerViews);
+    const pvStates = Object.keys(pv).filter((st) => pv[st]);
     box.replaceChildren(
       item('links', ...links),
       item('clock sync', el('b', { text: `${cs.in ?? 0} in / ${cs.out ?? 0} out` }), `, max |offset| ${fmtMs(sum.maxAbsOffsetMs)}`),
@@ -100,6 +104,46 @@
       item('pending', el('b', { text: sum.pending ?? '-', title: 'requests sent, awaiting response' })),
       item('queued', el('b', { text: sum.queued ?? '-', title: 'sends waiting for messaging to open' })),
       item('failures', ...failureChips(sum.failures)));
+    if (s.mode === 'gateway' && pvStates.length) {
+      const views = (s.links || []).filter((l) => l.via === 'gateway');
+      const slow = views.filter((l) => l.peerStatus === 'slow').length;
+      const unknown = pv.unknown || 0;
+      const total = pvStates.reduce((a, st) => a + pv[st], 0);
+      const counts = pvStates.filter((st) => st !== 'unknown').map((st) => el('span', { title: st },
+        el('span', { cls: `sw via ${STATES.includes(st) ? `s-${st}` : 's-unknown'}` }), el('b', { text: pv[st] }), ' '));
+      const extra = [];
+      if (slow) extra.push(el('span', { title: 'reachable, but the gateway reports it slow' }, el('span', { cls: 'sw via s-reachable slow' }), el('b', { text: slow, cls: 'warn' }), ' slow '));
+      if (unknown) {
+        extra.push(el('span', { title: 'no peers info from the gateway for these views' }, el('span', { cls: 'sw via s-noview' }), el('b', { text: unknown }), ' unknown'));
+        if (unknown === total) extra.push(el('span', { cls: 'hint', text: ' (gateway sends no peers)' }));
+      }
+      box.append(item('peer views via gateway', ...counts, ...extra));
+    }
+  }
+
+  // ---- mesh vs gateway, whole last run of each mode ----
+  function renderLastRun(s) {
+    const box = $('lastRun');
+    const lr = obj(obj(s.metrics).lastRun);
+    const modes = ['mesh', 'gateway'].filter((m) => lr[m] && typeof lr[m] === 'object');
+    if (!modes.length) { box.replaceChildren(); return; }
+    const runs = modes.map((m) => lr[m]);
+    const fmtPct = (v) => (typeof v === 'number' ? `${(v * 100).toFixed(1)} %` : '-');
+    const rows = [
+      ['run', (r) => (r.endedTs == null ? 'live' : `ended ${ageText(r.endedTs)}`)],
+      ['duration', (r) => fmtAge(r.durationMs)],
+      ['nodes', (r) => r.nodes],
+      ['links open', (r) => `${r.openConnections ?? '-'}/${r.possibleLinks ?? '-'}`],
+      ['messages', (r) => r.messages],
+      ['p50 / p95', (r) => `${fmtMs(r.p50Ms)} / ${fmtMs(r.p95Ms)}`],
+      ['throughput', (r) => (r.throughputPerSec == null ? '-' : `${r.throughputPerSec}/s`)],
+      ['error rate', (r) => fmtPct(r.errorRate)],
+      ['detect avg', (r) => fmtMs(r.detectMsAvg)],
+      ['failures', (r) => el('span', null, ...failureChips(r.failures))],
+    ];
+    box.replaceChildren(
+      el('div', { cls: 'hint', text: 'mesh vs gateway, whole last run of each mode' }),
+      miniTable([''].concat(modes), rows.map(([label, f]) => [label].concat(runs.map(f)))));
   }
 
   // ---- link matrix ----
@@ -107,17 +151,25 @@
     const nodes = s.nodes || [];
     const links = s.links || [];
     const hasGw = links.some((l) => l.to === 'gateway');
-    if (s.mode === 'gateway') return ['gateway'];
-    const cols = nodes.filter((n) => !n.external).map((n) => n.nodeId);
+    const views = links.some((l) => l.via === 'gateway');
+    if (s.mode === 'gateway' && !views) return ['gateway'];
+    const cols = nodes.filter((n) => views || !n.external).map((n) => n.nodeId);
     for (const l of links) if (l.to !== 'gateway' && !cols.includes(l.to)) cols.push(l.to);
     if (hasGw) cols.push('gateway');
     return cols;
   }
 
+  // Link-state class; a via-gateway view the gateway has not told us about gets its own grey.
+  function stateCls(l) {
+    if (l.state === 'unknown' && l.via === 'gateway') return 's-noview via';
+    const cls = STATES.includes(l.state) ? `s-${l.state}` : 's-unknown';
+    return l.via === 'gateway' ? `${cls} via${l.peerStatus === 'slow' ? ' slow' : ''}` : cls;
+  }
+
   function linkTitle(l) {
-    const parts = [`${l.from} \u2192 ${l.to}: ${l.state}`];
+    const parts = [`${l.from} \u2192 ${l.to}${l.via === 'gateway' ? ' (via gateway)' : ''}: ${l.state}${l.peerStatus ? ` (gateway says ${l.peerStatus})` : ''}`];
     if (l.clockSync != null) parts.push(`clock ${l.clockSync} sync, offset ${l.offsetMs ?? '-'} ms`);
-    parts.push(`last heartbeat ${ageText(l.lastHeartbeatTs)}`);
+    parts.push(`${l.via === 'gateway' ? 'last probe naming this peer' : 'last heartbeat'} ${ageText(l.lastHeartbeatTs)}`);
     return parts.join('\n');
   }
 
@@ -148,9 +200,11 @@
           td.classList.add('s-none');
           td.title = `${n.nodeId} \u2192 ${c}: no link`;
         } else {
-          td.classList.add(STATES.includes(l.state) ? `s-${l.state}` : 's-unknown');
+          td.className = `${td.className} ${stateCls(l)}`.trim();
           td.title = linkTitle(l);
-          if (l.clockSync === 'out') {
+          if (l.via === 'gateway') {
+            td.textContent = l.peerStatus == null ? (l.state === 'unknown' ? '?' : '') : (PEER_MARK[l.peerStatus] ?? '*');
+          } else if (l.clockSync === 'out') {
             td.classList.add('oos');
             td.textContent = OOS_MARK;
           }
@@ -162,11 +216,16 @@
     $('matrix').replaceChildren(thead, tbody);
   }
 
-  function renderLegend() {
+  function renderLegend(s) {
     const items = STATES.map((st) => el('span', null, el('span', { cls: `sw s-${st}` }), st));
     const oos = el('span', { cls: 'sw s-reachable oos', text: OOS_MARK });
     items.push(el('span', { title: '|offsetMs| > 100' }, oos, 'clock out of sync'));
     items.push(el('span', null, el('span', { cls: 'sw s-none' }), 'no link'));
+    if (s && s.mode === 'gateway') {
+      items.push(el('span', { title: 'what the gateway probes say about the peer; mark = raw status (s slow, d down, r restarting, l leaving)' }, el('span', { cls: 'sw s-reachable via' }), 'via gateway'));
+      items.push(el('span', { title: 'gateway status slow, counted as reachable' }, el('span', { cls: 'sw s-reachable via slow', text: 's' }), 'slow'));
+      items.push(el('span', { title: 'no peers info from the gateway' }, el('span', { cls: 'sw s-noview via', text: '?' }), 'unknown'));
+    }
     $('legend').replaceChildren(...items);
   }
 
@@ -194,7 +253,7 @@
     if (n.queued != null) kv.append(el('dt', { text: 'queued' }), el('dd', { text: n.queued, title: 'sends waiting for messaging to open' }));
     if (n.pending != null) kv.append(el('dt', { text: 'pending' }), el('dd', { text: n.pending, title: 'requests sent, awaiting response' }));
     if (n.dedup) kv.append(el('dt', { text: 'dedup' }), el('dd', { text: `${n.dedup.size ?? '-'} cached, ${n.dedup.hits ?? '-'} duplicates caught` }));
-    if (n.gateway) {
+    if (n.gateway && (state.mode === 'gateway' || n.external)) {
       const g = n.gateway;
       const probe = g.lastProbeAgeMs == null ? '' : `, last probe ${fmtAge(g.lastProbeAgeMs)} ago`;
       kv.append(el('dt', { text: 'gateway' }), el('dd', { text: `${g.registered ? 'registered' : 'not registered'}${probe}`, cls: g.registered ? 'ok' : null }));
@@ -212,11 +271,29 @@
     }
 
     const own = (state.links || []).filter((l) => l.from === n.nodeId);
+    const byPeer = n.counters ? obj(n.counters.byPeer) : {};
+    const peerIds = [...new Set(Object.keys(byPeer).concat(own.filter((l) => l.to !== 'gateway').map((l) => l.to)))].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
+    if (n.counters && n.counters.byPeer && peerIds.length) {
+      const q = (c) => { const x = obj(c); return `${x.request ?? 0}/${x.response ?? 0}/${x.oneway ?? 0}/${x.broadcast ?? 0}`; };
+      const gwMode = state.mode === 'gateway';
+      const rows = peerIds.map((id) => {
+        const p = byPeer[id] || {};
+        const l = own.find((x) => x.to === id);
+        const raw = l && l.via === 'gateway' && l.peerStatus ? ` (${l.peerStatus})` : '';
+        const st = l ? el('span', { title: l.via ? `via ${l.via}` : '', cls: l.peerStatus === 'slow' ? 'warn' : null }, el('i', { cls: stateCls(l) }), `${l.state}${raw}`) : '-';
+        const f = Object.entries(obj(p.failures)).map(([k, v]) => `${k} ${v}`).join(', ');
+        const row = [id, st];
+        if (gwMode) row.push(l && l.via === 'gateway' ? fmtAge(l.heartbeatAgeMs) : '-');
+        return row.concat([q(p.sent), q(p.received), f || '-']);
+      });
+      const head = gwMode ? ['peer', 'link', 'probe age', 'sent', 'received', 'failures'] : ['peer', 'link', 'sent', 'received', 'failures'];
+      parts.push(el('h3', { text: 'per peer (req/resp/oneway/bcast)' }), miniTable(head, rows));
+    }
     if (own.length && own.some((l) => 'misses' in l)) {
       const rows = own.map((l) => {
-        const st = el('span', null, el('i', { cls: STATES.includes(l.state) ? `s-${l.state}` : 's-unknown' }), l.state);
+        const st = el('span', null, el('i', { cls: stateCls(l) }), l.state);
         const off = l.offsetMs == null ? '-' : `${l.offsetMs}${l.clockSync === 'out' ? ` ${OOS_MARK}` : ''}`;
-        return [l.to, st, l.misses, off, fmtAge(l.heartbeatAgeMs)];
+        return [l.via === 'gateway' ? `${l.to} (gw)` : l.to, st, l.misses, off, fmtAge(l.heartbeatAgeMs)];
       });
       parts.push(el('h3', { text: 'links from this node' }), miniTable(['peer', 'state', 'misses', 'offset ms', 'heartbeat age'], rows));
     }
@@ -239,7 +316,9 @@
     if (!state) return;
     renderSummary(state);
     renderMatrix(state);
+    renderLegend(state);
     renderInternals(state);
+    renderLastRun(state);
     renderNode();
   }
 
@@ -270,6 +349,5 @@
     if (document.hidden) { clearTimeout(timer); timer = null; } else { refresh().then(schedule); }
   });
 
-  renderLegend();
   refresh().then(schedule);
 })();

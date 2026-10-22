@@ -167,8 +167,9 @@ function checkInternals(s) {
   ok(sum.maxAbsOffsetMs === null || isNum(sum.maxAbsOffsetMs), 'summary.maxAbsOffsetMs');
   for (const k of ['messagingDisabled', 'inflight', 'pending', 'queued']) ok(isNum(sum[k]), `summary.${k}`);
   ok(sum.failures && typeof sum.failures === 'object', 'summary.failures');
+  const real = s.links.filter((l) => l.via !== 'gateway').length;
   const total = Object.values(sum.linksByState).reduce((a, b) => a + b, 0);
-  ok(total === s.links.length, `linksByState sums to ${total}, links ${s.links.length}`);
+  ok(total === real, `linksByState sums to ${total}, real links ${real}`);
 }
 
 await check('state exposes node internals (limits, queue, dedup, counters, link misses, summary)', async () => {
@@ -201,6 +202,14 @@ await check('counters move: request n1 to n2, NO_LISTENER counted on the sender'
   ok(!node(b, 'n2').counters.failures.NO_LISTENER, 'failure not counted on the receiver');
   ok((b.summary.failures.NO_LISTENER || 0) - (a.summary.failures.NO_LISTENER || 0) === 1, 'summary.failures.NO_LISTENER +1');
   ok(b.summary.pending === 0 && node(b, 'n1').pending === 0, 'nothing pending after sync sends');
+  const p = (s, id, peer, k, t) => ((node(s, id).counters.byPeer || {})[peer] || { sent: {}, received: {}, failures: {} })[k][t] || 0;
+  ok(p(b, 'n1', 'n2', 'sent', 'request') - p(a, 'n1', 'n2', 'sent', 'request') === 2, 'n1 byPeer.n2 sent.request +2');
+  ok(p(b, 'n2', 'n1', 'received', 'request') - p(a, 'n2', 'n1', 'received', 'request') === 2, 'n2 byPeer.n1 received.request +2');
+  ok(p(b, 'n2', 'n1', 'sent', 'response') - p(a, 'n2', 'n1', 'sent', 'response') === 1, 'n2 byPeer.n1 sent.response +1');
+  ok(p(b, 'n1', 'n2', 'received', 'response') - p(a, 'n1', 'n2', 'received', 'response') === 1, 'n1 byPeer.n2 received.response +1');
+  ok(p(b, 'n1', 'n2', 'failures', 'NO_LISTENER') - p(a, 'n1', 'n2', 'failures', 'NO_LISTENER') === 1, 'n1 byPeer.n2 failures.NO_LISTENER +1');
+  ok(p(b, 'n1', 'n3', 'sent', 'request') === p(a, 'n1', 'n3', 'sent', 'request'), 'other peers untouched');
+  ok(b.links.every((l) => l.via === 'mesh'), 'mesh links have via mesh');
 });
 
 await check('async request + result + abort', async () => {
@@ -414,7 +423,7 @@ await check('switch to gateway mode and route through it', async () => {
   await until(async () => (await state()).openConnections === 20, 8000, 'mesh up');
   const r = await post(`${N}/api/mode`, { mode: 'gateway' });
   ok(r.status === 200 && r.body.mode === 'gateway', `mode ${r.status} ${JSON.stringify(r.body)}`);
-  await until(async () => { const s = await state(); return s.mode === 'gateway' && s.possibleLinks === 5 && s.links.every((l) => l.to === 'gateway'); }, 5000, 'gateway links');
+  await until(async () => { const s = await state(); return s.mode === 'gateway' && s.possibleLinks === 5 && s.links.filter((l) => l.via !== 'gateway').every((l) => l.to === 'gateway'); }, 5000, 'gateway links');
   // the switch resets the gateway's counter
   const before = await routed();
   const a = await send({ type: 'request', to: { nodeId: 'n3', appId: 'echo' } });
@@ -429,6 +438,38 @@ await check('switch to gateway mode and route through it', async () => {
   const n1 = node(s, 'n1');
   ok(n1.gateway.registered === true && isNum(n1.gateway.lastProbeAgeMs), `n1 gateway ${JSON.stringify(n1.gateway)}`);
   ok(n1.counters.sent.request >= 1 && n1.counters.sent.broadcast >= 1, `n1 counters ${JSON.stringify(n1.counters.sent)}`);
+  ok(n1.counters.byPeer.n3 && n1.counters.byPeer.n3.sent.request >= 1, `n1 byPeer.n3 ${JSON.stringify(n1.counters.byPeer)}`);
+  ok(['n2', 'n4', 'n5'].every((id) => n1.counters.byPeer[id] && n1.counters.byPeer[id].sent.broadcast >= 1), 'broadcast counted per destination');
+});
+
+let gatewaySendsPeers = false;
+await check('gateway mode: per-peer counters and peer views (unknown when the gateway sends no peers)', async () => {
+  const a = await state();
+  const r = await send({ type: 'request', to: { nodeId: 'n2', appId: 'echo' } });
+  ok(r.body.outcome === 'response', JSON.stringify(r.body));
+  const b = await state();
+  const p = (s, id, peer, k, t) => ((node(s, id).counters.byPeer || {})[peer] || { sent: {}, received: {} })[k][t] || 0;
+  ok(p(b, 'n1', 'n2', 'sent', 'request') - p(a, 'n1', 'n2', 'sent', 'request') === 1, 'n1 byPeer.n2 sent.request +1');
+  ok(p(b, 'n2', 'n1', 'received', 'request') - p(a, 'n2', 'n1', 'received', 'request') === 1, 'n2 byPeer.n1 received.request +1');
+  ok(p(b, 'n1', 'n2', 'received', 'response') - p(a, 'n1', 'n2', 'received', 'response') === 1, 'n1 byPeer.n2 received.response +1');
+  // The first probes tell whether this gateway sends peers at all.
+  let s;
+  try {
+    await until(async () => { s = await state(); return s.links.some((l) => l.via === 'gateway' && l.state !== 'unknown'); }, 3500, 'peer views');
+    gatewaySendsPeers = true;
+  } catch { s = await state(); }
+  const views = s.links.filter((l) => l.via === 'gateway');
+  ok(views.length === 20, `5 nodes see 4 peers each: ${views.length}`);
+  ok(views.every((l) => l.misses === null && l.clockSync === null && ['reachable', 'restarting', 'unreachable', 'disabled', 'unknown'].includes(l.state)), 'view shape');
+  ok(s.possibleLinks === 5 && s.openConnections === s.links.filter((l) => l.to === 'gateway' && l.state === 'reachable').length, `possibleLinks ${s.possibleLinks} open ${s.openConnections}`);
+  const pv = s.summary.peerViews || {};
+  ok(Object.values(pv).reduce((x, y) => x + y, 0) === 20, `summary.peerViews ${JSON.stringify(pv)}`);
+  ok(Object.values(s.summary.linksByState).reduce((x, y) => x + y, 0) === 5, `linksByState ${JSON.stringify(s.summary.linksByState)}`);
+  if (gatewaySendsPeers) {
+    ok(views.filter((l) => l.state === 'reachable').length === 20 && views.every((l) => typeof l.heartbeatAgeMs === 'number'), `views ${JSON.stringify(pv)}`);
+    ok(views.every((l) => ['up', 'slow'].includes(l.peerStatus)), `peerStatus ${JSON.stringify(views.map((l) => l.peerStatus))}`);
+  } else ok(views.every((l) => l.state === 'unknown' && l.lastHeartbeatTs === null && l.peerStatus === null), 'no peers from the gateway: all unknown');
+  console.log(`INFO gateway sends peers in probes: ${gatewaySendsPeers}`);
 });
 
 await check('gateway mode: kill node, detection via gateway', async () => {
@@ -437,6 +478,21 @@ await check('gateway mode: kill node, detection via gateway', async () => {
   const s = await state();
   ok(s.metrics.gateway.detectMs >= 1000 && s.metrics.gateway.detectMs <= 7000, `detectMs ${s.metrics.gateway.detectMs}`);
 });
+
+{
+  const name = 'gateway mode: a killed node turns unreachable in the other nodes\' peer views';
+  if (!gatewaySendsPeers) skip(name, 'this gateway sends no peers in its probes');
+  else {
+    await check(name, async () => {
+      const seen = (s) => s.links.filter((l) => l.via === 'gateway' && l.to === 'n4' && l.from !== 'n4');
+      await until(async () => seen(await state()).every((l) => l.state === 'unreachable'), 8000, 'n4 unreachable in views');
+      const s = await state();
+      ok(seen(s).length === 4, 'four observers');
+      ok(s.links.some((l) => l.via === 'gateway' && l.from === 'n1' && l.to === 'n2' && l.state === 'reachable'), 'live peers still reachable');
+      ok(s.summary.peerViews.unreachable >= 4, JSON.stringify(s.summary.peerViews));
+    });
+  }
+}
 
 await check('gateway down: NODE_UNAVAILABLE at gateway', async () => {
   await post(`${G}/api/admin`, { action: 'kill' });
@@ -479,6 +535,34 @@ await check('back to mesh, then failed switch rolls back', async () => {
   ok(r.status === 502 && r.body.error.code === 'MODE_SWITCH_FAILED', `${r.status} ${JSON.stringify(r.body)}`);
   ok((await state()).mode === 'mesh', 'stayed in mesh');
   await post(`${G}/api/admin`, { action: 'revive' });
+});
+
+await check('lastRun: each mode keeps its whole-run results after a switch; reset clears them', async () => {
+  await freshMesh(5);
+  let s = await state();
+  ok(s.metrics.lastRun && s.metrics.lastRun.gateway === null, `reset clears gateway run ${JSON.stringify(s.metrics.lastRun)}`);
+  ok(s.metrics.lastRun.mesh && s.metrics.lastRun.mesh.endedTs === null && s.metrics.lastRun.mesh.messages === 0, 'fresh mesh run in progress');
+  for (let i = 0; i < 5; i += 1) await send({ type: 'request', to: { nodeId: 'n2', appId: 'echo' } });
+  await send({ type: 'request', to: { nodeId: 'n2', appId: 'nope' } });
+  const g = await post(`${N}/api/mode`, { mode: 'gateway' });
+  ok(g.status === 200, `to gateway ${g.status} ${JSON.stringify(g.body)}`);
+  s = await state();
+  const m = s.metrics.lastRun.mesh;
+  ok(m.endedTs !== null && m.durationMs === m.endedTs - m.startedTs && m.messages === 6, `mesh run ${JSON.stringify(m)}`);
+  ok(m.nodes === 5 && m.possibleLinks === 20 && m.openConnections === 20, `mesh topology ${JSON.stringify(m)}`);
+  ok(m.p95Ms >= m.p50Ms && m.p50Ms >= 0 && m.throughputPerSec > 0 && Math.abs(m.errorRate - 1 / 6) < 0.01 && m.failures.UNKNOWN_APP === 1, `mesh numbers ${JSON.stringify(m)}`);
+  ok(s.metrics.lastRun.gateway && s.metrics.lastRun.gateway.endedTs === null, 'gateway run in progress');
+  for (let i = 0; i < 2; i += 1) await send({ type: 'request', to: { nodeId: 'n3', appId: 'echo' } });
+  await sleep(1500);
+  const frozen = (await state()).metrics.lastRun.mesh;
+  ok(JSON.stringify(frozen) === JSON.stringify(m), 'mesh run stays frozen');
+  const back = await post(`${N}/api/mode`, { mode: 'mesh' });
+  ok(back.status === 200, `to mesh ${back.status}`);
+  s = await state();
+  const gw = s.metrics.lastRun.gateway;
+  ok(gw.endedTs !== null && gw.messages === 2 && gw.possibleLinks === 5 && gw.failures && !Object.keys(gw.failures).length, `gateway run ${JSON.stringify(gw)}`);
+  ok(s.metrics.lastRun.mesh.endedTs === null && s.metrics.lastRun.mesh.messages === 0, 'new mesh run replaced the old one');
+  ok('p50Ms' in s.metrics.mesh && 'p50Ms' in s.metrics.gateway, 'rolling metrics unchanged');
 });
 
 console.log(`SCORE ${passed}/${total}`);

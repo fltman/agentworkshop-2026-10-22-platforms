@@ -13,3 +13,6 @@
 2026-10-22 11:25 MUTATE: 9ed445a3-α tile drops send console, gains node internals (cluster summary, per-node counters, queue, dedup, gateway registration, per-link misses); runtime 1c2d592a-β exposes them additively in /state
 2026-10-22 11:33 EVOLVE: 1c2d592a-β gen-004 (new gene observability 0.6, api-design 0.6->0.7; node internals in /state, 33/33 fake, 34/34 pisak)
 2026-10-22 11:33 EVOLVE: 9ed445a3-α gen-002 (focus 0.8, creative 0.5->0.4; tile shows only node internals nobody else has)
+2026-10-22 11:41 MUTATE: 1c2d592a-β gains peer-awareness in gateway mode (per-peer counters, peer views from gateway probe membership; asked pisak for peers field) to keep cluster-wide liveness in every node
+2026-10-22 11:45 MUTATE: 1c2d592a-β adds frozen per-mode run results (metrics.lastRun) so the group comparison has stable mesh vs gateway numbers
+2026-10-22 11:53 EVOLVE: 1c2d592a-β gen-005 (peer awareness via gateway v0.5 probes, per-peer counters, frozen per-mode lastRun with 2000-sample reservoir; 36/36 fake, 37/37 pisak v0.5)
