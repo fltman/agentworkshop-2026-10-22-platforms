@@ -17,6 +17,26 @@ const GATEWAY_API = Object.freeze({
 });
 const LOOPBACK_PATHS = new Set([...Object.values(NODE_API), ...Object.values(GATEWAY_API)]);
 
+const DEMO_STEPS = Object.freeze([
+  { id: 'start-mesh', title: 'Start five nodes in mesh mode' },
+  { id: 'mesh-traffic', title: 'Send traffic in mesh mode' },
+  { id: 'scale-mesh', title: 'Scale to fifteen nodes' },
+  { id: 'mesh-failure', title: 'Kill a mesh node and measure detection' },
+  { id: 'gateway-replay', title: 'Repeat traffic and node failure in gateway mode' },
+  { id: 'gateway-ha', title: 'Kill the gateway and verify HA failover' },
+  { id: 'comparison', title: 'Show the mesh versus gateway comparison' },
+]);
+
+function newDemoSteps() {
+  return DEMO_STEPS.map(step => ({
+    ...step,
+    status: 'pending',
+    startedAt: null,
+    completedAt: null,
+    metrics: null,
+  }));
+}
+
 const defaultState = () => ({
   mode: 'mesh',
   source: 'simulation',
@@ -60,6 +80,8 @@ const defaultState = () => ({
     results: { mesh: null, gateway: null },
     baseline: null,
     detection: { mesh: null, gateway: null },
+    steps: newDemoSteps(),
+    conclusion: null,
     eventCursors: {},
   },
   events: [],
@@ -112,6 +134,7 @@ function readState(dataDir) {
       ...(saved.scenario || {}),
       results: { ...defaultState().scenario.results, ...(saved.scenario?.results || {}) },
       detection: { ...defaultState().scenario.detection, ...(saved.scenario?.detection || {}) },
+      steps: Array.isArray(saved.scenario?.steps) ? saved.scenario.steps : newDemoSteps(),
       eventCursors: { ...(saved.scenario?.eventCursors || {}) },
     },
     events: pruneEvents(saved.events),
@@ -322,6 +345,25 @@ async function updateScenario(dataDir, runId, update) {
   return true;
 }
 
+async function beginDemoStep(dataDir, runId, stepId) {
+  await updateScenario(dataDir, runId, state => {
+    const step = state.scenario.steps.find(item => item.id === stepId);
+    if (!step || step.status !== 'pending') return;
+    step.status = 'running';
+    step.startedAt = new Date().toISOString();
+  });
+}
+
+async function completeDemoStep(dataDir, runId, stepId, metrics) {
+  await updateScenario(dataDir, runId, state => {
+    const step = state.scenario.steps.find(item => item.id === stepId);
+    if (!step) return;
+    step.status = 'done';
+    step.completedAt = new Date().toISOString();
+    step.metrics = metrics ?? null;
+  });
+}
+
 async function latestNodeEventSeq() {
   let page = await loopbackApi(NODE_API.events, 'GET', undefined, { since: 0 });
   while (page.more) {
@@ -368,6 +410,55 @@ function metricSnapshot(state) {
     nodeCount: state.nodeCount,
     capturedAt: new Date().toISOString(),
   };
+}
+
+function modeStepMetrics(state, mode) {
+  const result = state.scenario.results[mode];
+  return {
+    mode,
+    nodeCount: result?.nodeCount ?? state.nodeCount,
+    throughput: result?.throughput ?? state.metrics.throughput,
+    latencyP50: result?.latencyP50 ?? state.metrics.latencyP50,
+    latencyP95: result?.latencyP95 ?? state.metrics.latencyP95,
+    errorRate: result?.errorRate ?? state.metrics.errorRate,
+    openConnections: result?.openConnections ?? state.metrics.openConnections,
+    durationMs: result?.durationMs ?? null,
+    detectionMs: state.scenario.detection[mode] ?? result?.failedNodeDetectionMs ?? null,
+  };
+}
+
+function comparisonConclusion(state) {
+  const better = (mesh, gateway) => (
+    mesh == null || gateway == null || mesh === gateway
+      ? null
+      : mesh < gateway ? 'mesh' : 'gateway'
+  );
+  const mesh = state.scenario.results.mesh;
+  const gateway = state.scenario.results.gateway;
+  return {
+    lowerP95Mode: better(mesh?.latencyP95, gateway?.latencyP95),
+    fewerConnectionsMode: better(mesh?.openConnections, gateway?.openConnections),
+    fasterDetectionMode: better(state.scenario.detection.mesh, state.scenario.detection.gateway),
+    gatewayHaFailoverMs: state.gateway.ha?.lastFailoverMs ?? null,
+  };
+}
+
+function getStepMetrics(dataDir, runId, stepId) {
+  const state = readState(dataDir);
+  if (!state.running || state.scenario.runId !== runId) return null;
+  if (stepId === 'mesh-traffic') return state.scenario.baseline;
+  if (stepId === 'scale-mesh' || stepId === 'mesh-failure') return modeStepMetrics(state, 'mesh');
+  if (stepId === 'gateway-replay') return modeStepMetrics(state, 'gateway');
+  if (stepId === 'gateway-ha') {
+    return {
+      gatewayHealthy: state.gateway.healthy,
+      haEnabled: state.gateway.haEnabled,
+      failovers: state.gateway.ha?.failovers ?? null,
+      lastFailoverMs: state.gateway.ha?.lastFailoverMs ?? null,
+      gatewayHop: state.scenario.results.gateway?.gatewayMetrics ?? null,
+    };
+  }
+  return null;
 }
 
 function applyLiveSnapshot(target, liveState) {
@@ -427,6 +518,7 @@ async function runLiveDemo(dataDir, runId) {
     if (!scenarioIsCurrent(dataDir, runId)) throw new Error('Demo run was cancelled.');
   };
 
+  await beginDemoStep(dataDir, runId, 'start-mesh');
   await runDemoStep(dataDir, runId, 'Preparing five-node mesh', async () => {
     ensureCurrent();
     await gatewayAdmin('revive');
@@ -443,7 +535,9 @@ async function runLiveDemo(dataDir, runId) {
       state.source = 'live';
     });
   });
+  await completeDemoStep(dataDir, runId, 'start-mesh', { mode: 'mesh', nodeCount: 5 });
 
+  await beginDemoStep(dataDir, runId, 'mesh-traffic');
   await runDemoStep(dataDir, runId, 'Measuring five-node mesh baseline', async () => {
     await wait(10000);
     ensureCurrent();
@@ -453,7 +547,9 @@ async function runLiveDemo(dataDir, runId) {
       current.scenario.baseline = { ...metricSnapshot(current), nodeCount: 5 };
     });
   });
+  await completeDemoStep(dataDir, runId, 'mesh-traffic', await getStepMetrics(dataDir, runId, 'mesh-traffic'));
 
+  await beginDemoStep(dataDir, runId, 'scale-mesh');
   await runDemoStep(dataDir, runId, 'Scaling mesh to fifteen nodes', async () => {
     ensureCurrent();
     await loopbackApi(NODE_API.nodes, 'POST', { count: 10, external: false });
@@ -467,7 +563,9 @@ async function runLiveDemo(dataDir, runId) {
     const state = await syncLiveState(readState(dataDir));
     await updateScenario(dataDir, runId, current => applyLiveSnapshot(current, state));
   });
+  await completeDemoStep(dataDir, runId, 'scale-mesh', await getStepMetrics(dataDir, runId, 'scale-mesh'));
 
+  await beginDemoStep(dataDir, runId, 'mesh-failure');
   await runDemoStep(dataDir, runId, 'Detecting mesh node failure', async from => {
     ensureCurrent();
     const killedAt = Date.now();
@@ -480,7 +578,9 @@ async function runLiveDemo(dataDir, runId) {
       current.scenario.detection.mesh = detectedMs;
     });
   });
+  await completeDemoStep(dataDir, runId, 'mesh-failure', await getStepMetrics(dataDir, runId, 'mesh-failure'));
 
+  await beginDemoStep(dataDir, runId, 'gateway-replay');
   await runDemoStep(dataDir, runId, 'Switching the same 15 nodes to gateway mode', async () => {
     ensureCurrent();
     const result = await loopbackApi(NODE_API.mode, 'POST', { mode: 'gateway' });
@@ -539,7 +639,9 @@ async function runLiveDemo(dataDir, runId) {
       current.scenario.detection.gateway = detectedMs;
     });
   });
+  await completeDemoStep(dataDir, runId, 'gateway-replay', await getStepMetrics(dataDir, runId, 'gateway-replay'));
 
+  await beginDemoStep(dataDir, runId, 'gateway-ha');
   await runDemoStep(dataDir, runId, 'Checking gateway failure and HA recovery', async () => {
     ensureCurrent();
     const down = await gatewayAdmin('kill');
@@ -598,8 +700,16 @@ async function runLiveDemo(dataDir, runId) {
       }
     });
   });
+  await completeDemoStep(dataDir, runId, 'gateway-ha', await getStepMetrics(dataDir, runId, 'gateway-ha'));
 
+  await beginDemoStep(dataDir, runId, 'comparison');
   await updateScenario(dataDir, runId, state => {
+    state.scenario.conclusion = comparisonConclusion(state);
+    const step = state.scenario.steps.find(item => item.id === 'comparison');
+    step.status = 'done';
+    step.startedAt ||= new Date().toISOString();
+    step.completedAt = new Date().toISOString();
+    step.metrics = state.scenario.conclusion;
     state.running = false;
     state.scenario.step = 'Demo complete';
     state.source = 'live';
@@ -623,6 +733,13 @@ async function finishDemo(dataDir, runId, err) {
     state.running = false;
     state.scenario.step = `Demo paused: ${err.message}`;
     state.liveError = err.message;
+    for (const step of state.scenario.steps) {
+      if (step.status === 'running') {
+        step.status = 'failed';
+        step.completedAt = new Date().toISOString();
+        step.error = err.message;
+      }
+    }
     recordEvent(state, dataDir, 'scenario', `Demo failed: ${err.message}`);
   });
 }
@@ -677,6 +794,8 @@ async function applyAction(state, dataDir, action, payload={}) {
       state.scenario.results = { mesh: null, gateway: null };
       state.scenario.baseline = null;
       state.scenario.detection = { mesh: null, gateway: null };
+      state.scenario.steps = newDemoSteps();
+      state.scenario.conclusion = null;
       state.scenario.eventCursors = {};
       state.scenario.step = 'Starting live scenario';
       recordEvent(state, dataDir, 'scenario', `Scenario started: ${state.scenario.name}`);
@@ -774,6 +893,13 @@ module.exports = {
     if (fresh.running) {
       fresh.running = false;
       fresh.scenario.step = 'Demo interrupted by restart';
+      for (const step of fresh.scenario.steps) {
+        if (step.status === 'running') {
+          step.status = 'failed';
+          step.completedAt = new Date().toISOString();
+          step.error = 'Demo interrupted by restart.';
+        }
+      }
     }
     if (!fresh.events || !fresh.events.length) {
       fresh.events = [{ type: 'system', text: 'Control module initialized', ts: Date.now() }];
