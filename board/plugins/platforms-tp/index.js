@@ -241,9 +241,9 @@ function syncNodeState(state, nodeState) {
         latencyP50: Number(lastRun.p50 ?? lastRun.p50Ms) || 0,
         latencyP95: Number(lastRun.p95 ?? lastRun.p95Ms) || 0,
         errorRate: Number(lastRun.errorRate) || 0,
-        failedNodeDetectionMs: Number(lastRun.detectMs ?? lastRun.failedNodeDetectionMs) || 0,
+        failedNodeDetectionMs: Number(lastRun.detectMs ?? lastRun.detectMsAvg ?? lastRun.failedNodeDetectionMs) || 0,
         openConnections: Number(lastRun.openConnections) || 0,
-        nodeCount: Number(lastRun.nodeCount) || 0,
+        nodeCount: Number(lastRun.nodeCount ?? lastRun.nodes) || 0,
         durationMs: Number(lastRun.duration) || 0,
         capturedAt: new Date().toISOString(),
       };
@@ -626,7 +626,12 @@ async function applyAction(state, dataDir, action, payload={}) {
       break;
     }
     case 'toggle-ha': {
-      state.gateway.haEnabled = !state.gateway.haEnabled;
+      const enabled = !state.gateway.haEnabled;
+      const gatewayState = await gatewayAdmin('ha', {
+        enabled,
+        detectMs: Number(state.gateway.ha?.detectMs) || 1000,
+      });
+      syncGatewayHealth(state, gatewayState);
       state.scenario.step = state.gateway.haEnabled ? 'ha active' : 'ha standby';
       recordEvent(state, dataDir, 'gateway', `HA pair ${state.gateway.haEnabled ? 'enabled' : 'disabled'}`);
       break;

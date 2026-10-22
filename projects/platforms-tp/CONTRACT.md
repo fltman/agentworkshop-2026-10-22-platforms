@@ -90,6 +90,9 @@ retained for side-by-side comparison. Other controls return `409` while the demo
 pauses the demo, attempts to stop traffic and restore gateway availability, reports the error in
 `scenario.step`/`liveError`, and unlocks controls.
 
+`toggle-ha` forwards the desired enabled state to Pisak's HA admin action, using its current detection interval or
+1000 ms when no HA state is available.
+
 Node controls use fixed Farzad API paths for state, reset, scaling, mode, traffic, chaos and events; gateway controls
 use Pisak's state and admin APIs. Requests go over loopback without following redirects. `toggle-gateway` sends
 `kill` or `revive`; `reset` sends `reset`, which clears gateway state without reviving a killed gateway. Switching

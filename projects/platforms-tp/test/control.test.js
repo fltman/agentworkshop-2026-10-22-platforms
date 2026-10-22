@@ -98,6 +98,23 @@ test('toggle-gateway calls the local Pisak admin API and syncs its state', async
   assert.equal(result.body.state.gateway.healthy, false);
 });
 
+test('toggle-ha forwards the enabled state to Pisak', async () => {
+  global.fetch = async (url, options) => {
+    const target = new URL(url);
+    assert.equal(target.pathname, '/t/pisak/api/admin');
+    assert.deepEqual(JSON.parse(options.body), { action: 'ha', enabled: true, detectMs: 1000 });
+    return responseWithJson({
+      ok: true,
+      state: { gateway: { status: 'up' }, ha: { enabled: true, active: 'a', detectMs: 1000, failovers: 0 } },
+    });
+  };
+
+  const result = await control('toggle-ha');
+  assert.equal(result.status, 200);
+  assert.equal(result.body.state.gateway.haEnabled, true);
+  assert.equal(result.body.state.gateway.ha.active, 'a');
+});
+
 test('gateway admin redirects are rejected without following them', async () => {
   global.fetch = async (_url, options) => {
     assert.equal(options.redirect, 'manual');
@@ -196,6 +213,44 @@ test('state reads live NodeLink metrics and labels them as live', async () => {
   assert.equal(result.body.metrics.openConnections, 4);
   assert.equal(result.body.nodeCount, 1);
   assert.equal(result.body.gateway.available, true);
+});
+
+test('state imports Farzad frozen per-mode metrics using the published fields', async () => {
+  global.fetch = async url => {
+    const target = new URL(url);
+    if (target.pathname === '/t/farzad/api/state') {
+      const state = nodeState();
+      state.metrics.lastRun = {
+        mesh: {
+          p50: 4,
+          p95: 9,
+          throughput: 23,
+          errorRate: 0.02,
+          detectMsAvg: 3100,
+          openConnections: 20,
+          nodes: 5,
+          duration: 12000,
+        },
+      };
+      return responseWithJson(state);
+    }
+    if (target.pathname === '/t/pisak/api/state') return responseWithJson({ gateway: { status: 'up' } });
+    assert.fail(`unexpected upstream path ${target.pathname}`);
+  };
+
+  const result = await getState();
+  assert.deepEqual(result.body.scenario.results.mesh, {
+    throughput: 23,
+    latencyP50: 4,
+    latencyP95: 9,
+    errorRate: 0.02,
+    failedNodeDetectionMs: 3100,
+    openConnections: 20,
+    nodeCount: 5,
+    durationMs: 12000,
+    capturedAt: result.body.scenario.results.mesh.capturedAt,
+  });
+  assert.ok(Number.isFinite(Date.parse(result.body.scenario.results.mesh.capturedAt)));
 });
 
 test('state labels simulated metrics when the live Node API is unavailable', async () => {
