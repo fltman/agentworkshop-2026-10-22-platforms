@@ -44,3 +44,4 @@ This capability does NOT handle:
 
 - 2026-10-22: Split from `node-api-integration` at energy 90 to isolate scenario sequencing and measurement.
 - 2026-10-22: Energy increased from 45 to 55 after implementing and testing the audited live demo sequence.
+- 2026-10-22: Energy increased from 55 to 65 after PR #27 added the read-only seven-step progress contract and restart-visible failures.

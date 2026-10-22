@@ -30,6 +30,8 @@ metrics contain an objective `scenario.conclusion` with `lowerP95Mode`, `fewerCo
 
 Example response:
 
+The `steps` array below shows its first entry; the runtime state includes all seven project-demo entries.
+
 ```json
 {
   "mode": "mesh",
