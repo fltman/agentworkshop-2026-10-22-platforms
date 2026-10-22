@@ -126,10 +126,15 @@ async function gatewayAdmin(action) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action }),
+      redirect: 'manual',
       signal: AbortSignal.timeout(3000),
     });
   } catch (err) {
     throw new GatewayAdminError(`Gateway admin request failed: ${err.message}`);
+  }
+
+  if (response.status >= 300 && response.status < 400) {
+    throw new GatewayAdminError(`Gateway admin returned an unexpected redirect (HTTP ${response.status}).`);
   }
 
   let result;
