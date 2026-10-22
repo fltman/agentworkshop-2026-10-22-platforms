@@ -4,7 +4,7 @@ type: capability
 domain: backend
 tools: Read, Edit, Bash, Grep, Glob
 model: inherit
-energy: 45
+energy: 55
 spawned: 2026-10-22
 can-merge-with: [node-api-contracts]
 ---
@@ -41,3 +41,4 @@ This capability does NOT handle:
 ## Evolution History
 
 - 2026-10-22: Split from `node-api-integration` at energy 90 to isolate scenario sequencing and measurement.
+- 2026-10-22: Energy increased from 45 to 55 after implementing and testing the audited live demo sequence.

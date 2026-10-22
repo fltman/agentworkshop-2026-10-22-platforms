@@ -4,7 +4,7 @@ type: capability
 domain: backend
 tools: Read, Edit, Bash, Grep, Glob
 model: inherit
-energy: 45
+energy: 55
 spawned: 2026-10-22
 can-merge-with: [scenario-orchestration]
 ---
@@ -44,3 +44,4 @@ This capability does NOT handle:
 ## Evolution History
 
 - 2026-10-22: Split from `node-api-integration` at energy 90 to isolate upstream contract integration.
+- 2026-10-22: Energy increased from 45 to 55 after validating Farzad's merged contracts and integrating the runner fix.
