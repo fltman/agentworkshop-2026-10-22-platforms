@@ -1,6 +1,6 @@
 # Gateway contract (module B, team pisak)
 
-Status: **v0.6, implemented** in `board/plugins/pisak/` (tests: `projects/pisak/test/gateway.test.mjs`). Comments and
+Status: **v0.7, implemented** in `board/plugins/pisak/` (tests: `projects/pisak/test/gateway.test.mjs`). Comments and
 change requests go to `@pisak` in `#build`. Only pisak changes this file, and every change is announced in `#build`
 before it ships.
 
@@ -57,6 +57,17 @@ requests in `#build`.
   `ok`, `latencyMs`, `errorCode`. The polling answer is `{seq, events}`, the same as farzad's.
 - `/state` has per-node `status` (`up` | `slow` | `down`), `circuit` and `links`. Metric names are `p50Ms`, `p95Ms`,
   `throughputPerSec`, `errorRate` and `detectMs`, the same as farzad's.
+
+## Changes in v0.7 (farzad's audit, #build 294)
+
+- A re-register keeps the token when it carries the current token, or repeats the same `deliverUrl` within 3 s
+  (section 3, `/register`). Concurrent registers from one node no longer leave it with a stale token.
+- A route to a node the gateway knew before a restart, which has not registered again yet, answers
+  `503 NODE_UNAVAILABLE` with `reason: "not_registered"` instead of `404 UNKNOWN_NODE`. A node that deregistered, or
+  any node after `reset`, is still `UNKNOWN_NODE`.
+- `/metrics` `detectMs` stays `null` until the gateway has detected a node down since the last `reset`. It is
+  measured from the node's last successful probe to the moment it is declared down. The agreed demo figure (kill to
+  node-down) comes from farzad's `lastRun`.
 
 ## Changes in v0.6 (HA pair, demo step 6)
 
@@ -124,7 +135,7 @@ for every error the gateway makes itself.
 | `UNKNOWN_NODE`      | 404       | the destination nodeId is not registered                                               |
 | `UNKNOWN_APP`       | 404       | the node is registered but does not have that appId                                    |
 | `TIMEOUT`           | 504       | no answer within `ttlMs`, retries included                                             |
-| `NODE_UNAVAILABLE`  | 503       | `reason` is `"node_down"` (failed probes), `"circuit_open"`, `"unreachable"`, `"bad_response"` (the node answered without a NodeLink error, or with a redirect: the gateway never follows a 3xx), or `"gateway_down"` (the gateway is killed) |
+| `NODE_UNAVAILABLE`  | 503       | `reason` is `"node_down"` (failed probes), `"circuit_open"`, `"unreachable"`, `"bad_response"` (the node answered without a NodeLink error, or with a redirect: the gateway never follows a 3xx), `"not_registered"` (the gateway knew the node before it restarted, and the node has not registered again yet), or `"gateway_down"` (the gateway is killed) |
 | `REJECTED`          | 401 / 429 | `reason` is `"auth"` (401: missing token, bad token, or a token that is not the sender's) or `"rate_limit"` (429, with a `Retry-After` header) |
 | `MESSAGE_TOO_LARGE` | 413       | the envelope is larger than 65536 bytes                                                |
 | `BAD_PROTOCOL`      | 400       | invalid envelope or body, wrong `proto`, or unsupported `version`                       |
@@ -138,8 +149,10 @@ All calls except `register` need `Authorization: Bearer <token>`.
 
 ### POST `/register`
 
-A node joins. Registering an existing `nodeId` again replaces its entry (new token, new app list), so a restarted node
-can rejoin.
+A node joins. Registering an existing `nodeId` again replaces its entry (new app list, fresh state), so a restarted
+node can rejoin. The token is kept when the request carries the node's current token as `Authorization: Bearer
+<token>`, or when the same `deliverUrl` registers again within 3 s of the last registration (two registers in
+flight from one node get one token). Otherwise a new token is issued and the old one stops working.
 
 Request:
 

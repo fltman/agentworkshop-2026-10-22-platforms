@@ -36,7 +36,7 @@ class GatewayPair {
   instance(id) { return id === 'a' ? this.a : id === 'b' ? this.b : null; }
 
   // Registry changes are written through to the standby at once, so a failover never loses a token just handed out.
-  register(body) { return this.replicate(this.active.register(body)); }
+  register(body, req) { return this.replicate(this.active.register(body, req)); }
   heartbeat(req, body) { return this.active.heartbeat(req, body); }
   deregister(req, body) { return this.replicate(this.active.deregister(req, body)); }
   listNodes(req) { return this.active.listNodes(req); }
@@ -44,7 +44,7 @@ class GatewayPair {
 
   replicate(result) {
     const sb = this.standby();
-    if (this.enabled && sb.status === 'up' && this.active.status === 'up') sb.restore(this.active.snapshot());
+    if (this.enabled && sb.status === 'up' && this.active.status === 'up') sb.restore(this.active.snapshot(), this.active.known);
     return result;
   }
 
@@ -52,7 +52,7 @@ class GatewayPair {
     const act = this.active, sb = this.standby();
     act.tick();
     if (!this.enabled || sb.status !== 'up') return;
-    if (act.status === 'up') sb.restore(act.snapshot());
+    if (act.status === 'up') sb.restore(act.snapshot(), act.known);
     else if (Date.now() - act.killedAt >= this.detectMs) this.promote(sb, act);
   }
 
@@ -88,6 +88,7 @@ class GatewayPair {
       // Not a revive, and HA settings and failover counters stay: like the routes counter, they span resets.
       this.a.admin({ action: 'reset' });
       this.b.nodes.clear();
+      this.b.known.clear();
     } else {
       return badRequest('action must be kill, revive, config, reset or ha');
     }
@@ -99,7 +100,7 @@ class GatewayPair {
     if (g.status === 'up') return;
     g.admin({ action: 'revive' });
     const peer = g === this.a ? this.b : this.a;
-    if (this.enabled && peer.status === 'up') g.restore(peer.snapshot());
+    if (this.enabled && peer.status === 'up') g.restore(peer.snapshot(), peer.known);
   }
 
   setHa(body) {
@@ -117,7 +118,7 @@ class GatewayPair {
       sb.status = 'up';
       sb.startedAt = Date.now();
       sb.config = { ...this.active.config };
-      sb.restore(this.active.status === 'up' ? this.active.snapshot() : []);
+      sb.restore(this.active.status === 'up' ? this.active.snapshot() : [], this.active.known);
       // Enabling HA while the gateway is dead starts the standby as the new active (empty registry: nodes re-register).
       if (this.active.status !== 'up') this.active = sb;
       sb.events.emit('ha-enabled', { from: 'control', to: 'gateway', ok: true, gatewayId: this.active.id, detectMs: this.detectMs });
@@ -127,6 +128,7 @@ class GatewayPair {
       const off = this.standby();
       off.status = 'down';
       off.nodes.clear();
+      off.known.clear();
       this.active.events.emit('ha-disabled', { from: 'control', to: 'gateway', ok: true, gatewayId: this.active.id });
     }
     return { status: 200, body: { ok: true, state: this.state() } };

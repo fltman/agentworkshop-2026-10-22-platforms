@@ -518,3 +518,37 @@ test('v0.6: with HA off the pair is byte-identical to a single v0.5 gateway (spo
     assert.equal(norm(rest), norm(single.state()), 'state differs after ' + step);
   }
 });
+
+test('v0.7: concurrent re-registers keep one token; a changed deliverUrl rotates it (farzad audit)', async () => {
+  await fresh({ rateLimitPerSec: 1000, rateLimitBurst: 1000 });
+  await register('n2');
+  const body = { nodeId: 'n1', apps: ['echo'], deliverUrl: '/t/fakenodes/n/n1/deliver' };
+  const [a, b] = await Promise.all([post('/t/pisak/api/register', body), post('/t/pisak/api/register', body)]);
+  assert.equal(a.body.token, b.body.token, 'two in-flight registers get the same token');
+  const kept = await post('/t/pisak/api/register', body, a.body.token);
+  assert.equal(kept.body.token, a.body.token, 'presenting the current token keeps it');
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), a.body.token)).status, 200);
+  const moved = await post('/t/pisak/api/register', { ...body, deliverUrl: '/t/fakenodes/n/n3/deliver' });
+  assert.notEqual(moved.body.token, a.body.token, 'a different deliverUrl without the token rotates it');
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), a.body.token)).status, 401);
+});
+
+test('v0.7: a known node that has not re-registered after a gateway restart is NODE_UNAVAILABLE not_registered', async () => {
+  await fresh({ rateLimitPerSec: 1000, rateLimitBurst: 1000 });
+  await register('n1');
+  await register('n2');
+  const t3 = await register('n3');
+  assert.equal((await post('/t/pisak/api/deregister', { nodeId: 'n3' }, t3)).status, 200);
+  await admin({ action: 'kill' });
+  await admin({ action: 'revive' });
+  const t1 = await register('n1');
+  const r = await post('/t/pisak/api/route', env('n1', 'n2'), t1);
+  assert.equal(r.status, 503);
+  assert.equal(r.body.error.code, 'NODE_UNAVAILABLE');
+  assert.equal(r.body.error.reason, 'not_registered');
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n3'), t1)).body.error.code, 'UNKNOWN_NODE', 'a node that left is unknown');
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n9'), t1)).body.error.code, 'UNKNOWN_NODE');
+  await admin({ action: 'reset' });
+  const t1b = await register('n1');
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1b)).body.error.code, 'UNKNOWN_NODE', 'reset forgets known nodes');
+});

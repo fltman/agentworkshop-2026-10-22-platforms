@@ -40,7 +40,7 @@ function readJson(req) {
 const badRequest = msg => ({ status: 400, body: { error: { code: 'BAD_PROTOCOL', reason: null, at: 'gateway', message: msg }, correlationId: null } });
 
 const POST_ROUTES = {
-  '/api/register': (req, body) => gw.register(body),
+  '/api/register': (req, body) => gw.register(body, req),
   '/api/heartbeat': (req, body) => gw.heartbeat(req, body),
   '/api/deregister': (req, body) => gw.deregister(req, body),
   '/api/route': (req, body) => gw.route(req, body),
@@ -51,7 +51,7 @@ function info() {
   return {
     status: 200,
     body: {
-      service: 'NodeLink gateway', team: 'pisak', contract: 'v0.6', gateway: gw.id, status: gw.status,
+      service: 'NodeLink gateway', team: 'pisak', contract: 'v0.7', gateway: gw.id, status: gw.status,
       endpoints: ['POST /api/register', 'POST /api/heartbeat', 'POST /api/deregister', 'GET /api/nodes', 'POST /api/route',
         'GET /api/state', 'GET /api/metrics', 'GET /api/events?since=<seq>&limit=<n>', 'GET /api/events/stream', 'POST /api/admin'],
     },

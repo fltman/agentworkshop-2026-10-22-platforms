@@ -23,7 +23,7 @@
 </style></head>
 <body><main>
   <h1>NodeLink Gateway</h1>
-  <p class="sub">Module B, team pisak. Registration, routing, auth, retries, circuit breaker, rate limit and probe-based failure detection.</p>
+  <p class="sub">Module B, team pisak. Registration, routing, auth, retries, circuit breaker, rate limit and probe-based failure detection. Read-only; add ?controls to the URL for the admin buttons.</p>
   <div class="row">
     <span>Gateway</span><span id="gw" class="pill">…</span>
     <button id="kill">Kill gateway</button><button id="revive">Revive</button><button id="reset">Reset</button>
@@ -45,6 +45,8 @@ const METRICS = [['p50Ms', 'p50 ms'], ['p95Ms', 'p95 ms'], ['throughputPerSec', 
   ['detectMs', 'detect ms'], ['routed', 'routed'], ['retries', 'retries'], ['rateLimited', 'rate limited']];
 let since = null;
 let haEnabled = false;
+// Read-only by default: the platforms-tp runner is the single controller during the demo (agreed in #build 293).
+if (!new URLSearchParams(location.search).has('controls')) for (const id of ['kill', 'revive', 'reset', 'ha']) $(id).hidden = true;
 
 async function getJson(path) { const r = await fetch(API + path, { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }
 

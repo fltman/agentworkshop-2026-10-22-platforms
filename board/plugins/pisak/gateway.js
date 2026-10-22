@@ -29,6 +29,9 @@ const PROTOCOL_CODES = new Set(['UNKNOWN_NODE', 'UNKNOWN_APP', 'NO_LISTENER', 'T
   'PEER_OVERLOADED', 'MESSAGE_TOO_LARGE', 'REJECTED', 'BAD_PROTOCOL']);
 const MAX_MESSAGE_BYTES = 65536;
 const MIN_TTL_MS = 50;
+// A re-register with the same deliverUrl this soon after the last one keeps the token (concurrent registers race).
+const TOKEN_REUSE_MS = 3000;
+const MAX_KNOWN = 1000;
 const RESTART_GRACE_MS = 10000;
 
 const sleep = ms => new Promise(r => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
@@ -51,6 +54,7 @@ class Gateway {
     this.id = id;
     this.config = { ...DEFAULTS };
     this.nodes = new Map();
+    this.known = new Set();
     this.events = shared.events || new Events();
     this.metrics = shared.metrics || new Metrics();
     this.status = 'up';
@@ -68,7 +72,7 @@ class Gateway {
 
   // ---------- registry ----------
 
-  register(body) {
+  register(body, req) {
     if (this.status !== 'up') return this.gatewayDown();
     if (!body || typeof body !== 'object') return badRequest('body must be a JSON object');
     const { nodeId, deliverUrl } = body;
@@ -92,11 +96,30 @@ class Gateway {
     const now = Date.now();
     const node = this.makeNode({
       nodeId, apps: [...new Set(apps)], deliverUrl, heartbeatUrl, external: body.external === true,
-      token: 'gw-tok-' + crypto.randomBytes(16).toString('hex'), registeredAt: now,
+      token: this.reusableToken(nodeId, deliverUrl, req, now) || 'gw-tok-' + crypto.randomBytes(16).toString('hex'), registeredAt: now,
     }, now);
     this.nodes.set(nodeId, node);
+    this.remember(nodeId);
     this.events.emit('node-registered', { from: nodeId, to: 'gateway', ok: true, nodeId, apps: node.apps, external: node.external });
     return { status: 200, body: { token: node.token, probeIntervalMs: this.config.probeIntervalMs, probeTimeoutMs: this.config.probeTimeoutMs } };
+  }
+
+  // The current token survives a re-register when the caller proves it holds it, or when the same registration is
+  // repeated within TOKEN_REUSE_MS (two in-flight registers from one node). Otherwise it rotates.
+  reusableToken(nodeId, deliverUrl, req, now) {
+    const old = this.nodes.get(nodeId);
+    if (!old) return null;
+    const m = req && /^Bearer\s+(\S+)$/i.exec((req.headers && req.headers.authorization) || '');
+    if (m && safeEqual(old.token, m[1])) return old.token;
+    return old.deliverUrl === deliverUrl && now - old.registeredAt < TOKEN_REUSE_MS ? old.token : null;
+  }
+
+  // Nodes the gateway has seen since the last reset, so a route to one that has not re-registered yet after a
+  // gateway restart is NODE_UNAVAILABLE (not_registered), not UNKNOWN_NODE.
+  remember(nodeId) {
+    this.known.delete(nodeId);
+    this.known.add(nodeId);
+    if (this.known.size > MAX_KNOWN) this.known.delete(this.known.values().next().value);
   }
 
   makeNode(id, now) {
@@ -120,7 +143,8 @@ class Gateway {
   }
 
   // Every restored node counts as just seen: the new active's own probes decide who is down.
-  restore(list) {
+  restore(list, known) {
+    this.known = new Set(known || list.map(s => s.nodeId));
     const now = Date.now();
     this.nodes = new Map(list.map(s => {
       const { graceUntil, leaving, probeSeq, ...id } = s;
@@ -158,6 +182,7 @@ class Gateway {
     const node = this.authenticate(req, body && body.nodeId);
     if (node.ok === false) return node;
     this.nodes.delete(node.nodeId);
+    this.known.delete(node.nodeId);
     this.events.emit('node-deregistered', { from: node.nodeId, to: 'gateway', ok: true, nodeId: node.nodeId });
     return { status: 200, body: { ok: true } };
   }
@@ -250,6 +275,9 @@ class Gateway {
     if (env.type === 'broadcast') return this.broadcast(env, src, deadline, fair);
 
     const dest = this.nodes.get(env.destination.nodeId);
+    if (!dest && this.known.has(env.destination.nodeId)) {
+      return fail(503, 'NODE_UNAVAILABLE', `${env.destination.nodeId} has not registered again since the gateway restarted`, 'not_registered');
+    }
     if (!dest) return fail(404, 'UNKNOWN_NODE', `${env.destination.nodeId} is not registered`);
     if (env.destination.appId !== '*' && !dest.apps.includes(env.destination.appId)) return fail(404, 'UNKNOWN_APP', `${dest.nodeId} has no app ${env.destination.appId}`);
     if (dest.status === 'down') return fail(503, 'NODE_UNAVAILABLE', `${dest.nodeId} is down`, 'node_down');
@@ -476,6 +504,7 @@ class Gateway {
     } else if (action === 'reset') {
       // Not a revive: farzad calls reset before every gateway switch, and a killed gateway must still fail it.
       this.nodes.clear();
+      this.known.clear();
       this.metrics.reset();
       this.events.reset();
       if (this.status === 'up') this.startedAt = Date.now();

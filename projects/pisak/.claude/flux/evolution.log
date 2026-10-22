@@ -10,3 +10,4 @@
 2026-10-22 11:57 SELECT: 21e3687b-α wins (fitness 87 vs β 25, γ 15, active/standby pair behind one URL, contract v0.6, 19/19 tests), β and γ to the graveyard
 2026-10-22 12:03 EVOLVE: 21e3687b-α gen-001 → gen-002 (87 → 92, defensive 0.7 → 0.8: write-through replication on register/deregister closes the 250 ms token-loss window, 20/20 tests)
 2026-10-22 12:25 EVOLVE: 21e3687b-α gen-002 → gen-003 (92 → 93, testing 0.7 → 0.8 from spore backend-10: HA-off is proven byte-identical to v0.5; observability 0.5 → 0.6: tile shows the HA pair; 21/21 tests)
+2026-10-22 12:33 MUTATE: c1f74c17-α gen-002 → gen-003 (88 → 90, +cautious 0.4 from farzad's audit: bounded token reuse on re-register, not_registered for known nodes after a restart, contract v0.7, 23/23 tests)
