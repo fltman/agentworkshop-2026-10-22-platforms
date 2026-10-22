@@ -39,6 +39,8 @@ main { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 12px 12px; align-i
 .s-self { background: repeating-linear-gradient(45deg, #1d2633 0 3px, #263243 3px 6px); }
 .s-none { background: transparent; outline: 1px dashed #2c3747; outline-offset: -1px; }
 .s-unknown { background: #8a6cff; }
+.s-noview { background: #3a4250; }
+.via { opacity: .6; outline: 1px dashed #dde3ea; outline-offset: -2px; }
 .oos { font-weight: bold; color: #fff; text-shadow: 0 0 2px #000; }
 
 .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font-size: 11px; color: #9aa7bd; }
@@ -63,3 +65,7 @@ main { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 12px 12px; align-i
 .mini th { color: #8a98b3; font-weight: normal; }
 .mini th:first-child, .mini td:first-child { text-align: left; }
 .mini td i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.lastRun { margin-top: 8px; }
+.lastRun table.mini td:first-child { color: #9aa; }
+.via.slow { background: #ff9f43; opacity: .9; outline-color: #ffd166; }
+.matrix td.via { color: #fff; text-shadow: 0 0 2px #000; }

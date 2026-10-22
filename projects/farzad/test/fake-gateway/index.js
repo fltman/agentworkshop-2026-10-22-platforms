@@ -4,6 +4,7 @@
 //   POST /api/route   (Bearer token) envelope -> node's answer, or {delivered, failed} for a broadcast
 //   POST /api/deregister {nodeId} (Bearer token)
 //   GET  /api/events?since=N -> {seq, events} with {kind:"node-down", detectMs} / node.up (probes heartbeatUrl every 1 s, down after 3 s)
+//   probes are {from:"gateway", ts, state, peers:{nodeId: up|slow|down}} (as pisak v0.5: never the probed node itself)
 //   POST /api/admin {action: kill|revive|reset}  the gateway stops answering (503), comes back, or forgets all nodes
 const http = require('http');
 
@@ -36,12 +37,17 @@ function auth(req) {
   return null;
 }
 
+// Every probe carries the gateway's view of all other registered nodes (peers, additive). slow: answered, but late.
+const peerStatus = (n) => (n.status === 'up' && n.rttMs > 500 ? 'slow' : n.status);
 async function probe() {
   for (const n of st.nodes.values()) {
     if (!n.heartbeatUrl) continue;
-    const r = await call(n.heartbeatUrl, { from: 'gateway', ts: Date.now() }, {}, 900);
+    const peers = Object.fromEntries([...st.nodes.values()].filter((p) => p !== n).map((p) => [p.nodeId, peerStatus(p)]));
+    const t0 = Date.now();
+    const r = await call(n.heartbeatUrl, { from: 'gateway', ts: t0, state: 'up', peers }, {}, 900);
     if (r.status === 200) {
       n.lastSeen = Date.now();
+      n.rttMs = n.lastSeen - t0;
       if (n.status === 'down') { n.status = 'up'; emit({ type: 'node.up', from: 'gateway', to: n.nodeId, ok: true }); }
     } else if (n.status === 'up' && Date.now() - n.lastSeen >= 3000) {
       n.status = 'down';

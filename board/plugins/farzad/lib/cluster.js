@@ -21,9 +21,11 @@ function guard(fn) {
 }
 
 // Collective view of node internals for /state (CONTRACT.md section 5, "summary").
+// linksByState counts real links (mesh and node-to-gateway), peerViews the via-gateway views.
 function summarize(nodes, links) {
-  const s = { linksByState: {}, clockSync: { in: 0, out: 0 }, maxAbsOffsetMs: null, messagingDisabled: 0, inflight: 0, pending: 0, queued: 0, failures: {} };
+  const s = { linksByState: {}, clockSync: { in: 0, out: 0 }, maxAbsOffsetMs: null, messagingDisabled: 0, inflight: 0, pending: 0, queued: 0, failures: {}, peerViews: {} };
   for (const l of links) {
+    if (l.via === 'gateway') { s.peerViews[l.state] = (s.peerViews[l.state] || 0) + 1; continue; }
     s.linksByState[l.state] = (s.linksByState[l.state] || 0) + 1;
     if (l.clockSync === 'in' || l.clockSync === 'out') s.clockSync[l.clockSync] += 1;
     if (typeof l.offsetMs === 'number' && (s.maxAbsOffsetMs === null || Math.abs(l.offsetMs) > s.maxAbsOffsetMs)) s.maxAbsOffsetMs = Math.abs(l.offsetMs);
@@ -88,6 +90,7 @@ class Cluster {
     this.teardown();
     this.metrics.reset();
     this.mode = mode;
+    this.metrics.startRun(mode);
     this.switching = false;
     this.nextNode = 1;
     this.gwResetDone = false;
@@ -250,6 +253,7 @@ class Cluster {
     if (!body || typeof body !== 'object') return;
     if (body.from === 'gateway') {
       n.lastProbeTs = Date.now();
+      n.onGatewayPeers(body.peers, n.lastProbeTs);
       if (n.token) this.setGwLink(n, 'reachable');
       return;
     }
@@ -335,9 +339,16 @@ class Cluster {
     if (target === this.mode) return { status: 200, body: { mode: this.mode, switchMs: 0, failed: [] } };
     const start = Date.now();
     const ep = this.epoch;
+    const from = this.mode;
+    const topo = this.topology();
     this.switching = true;
     try {
-      return target === 'gateway' ? await this.toGateway(start, ep) : await this.toMesh(start, ep);
+      const r = target === 'gateway' ? await this.toGateway(start, ep) : await this.toMesh(start, ep);
+      if (ep === this.epoch && this.mode === target) {
+        this.metrics.endRun(from, topo);
+        this.metrics.startRun(target);
+      }
+      return r;
     } finally {
       if (ep === this.epoch) this.switching = false;
     }
@@ -395,7 +406,7 @@ class Cluster {
     if (ep !== this.epoch) return { status: 502, body: { error: { code: 'MODE_SWITCH_FAILED', at: 'node', message: 'cluster was reset' }, failed: [] } };
     this.mode = 'mesh';
     for (const a of cluster) for (const b of cluster) if (a !== b) this.addLink(a.id, b.id);
-    for (const n of cluster) { n.route = 'mesh'; n.forceDisabled = false; this.recompute(n); }
+    for (const n of cluster) { n.route = 'mesh'; n.forceDisabled = false; n.gwPeers.clear(); n.gwPeersTs = null; this.recompute(n); }
     const switchMs = Date.now() - start;
     this.emit({ type: 'mode.change', from: 'gateway', to: 'mesh', ok: true, switchMs, failed: [] });
     this.kick();
@@ -469,21 +480,41 @@ class Cluster {
 
   // ----- state (CONTRACT.md section 5) -----
 
+  // The links the topology needs and the ones open now (CONTRACT.md section 5, possibleLinks/openConnections).
+  topology() {
+    const all = [...this.nodes.values()];
+    let possible = 0;
+    let open = 0;
+    if (this.mode === 'mesh') {
+      const c = all.filter((n) => !n.external).length;
+      possible = c * (c - 1);
+      for (const l of this.links.values()) if (l.state === 'reachable') open += 1;
+    }
+    for (const n of all) {
+      if (this.mode !== 'gateway' && !n.external) continue;
+      possible += 1;
+      if (n.gwLink.state === 'reachable') open += 1;
+    }
+    return { nodes: all.length, openConnections: open, possibleLinks: possible };
+  }
+
   state() {
     const now = Date.now();
     const all = [...this.nodes.values()];
     const links = [];
-    let possible = 0;
-    if (this.mode === 'mesh') {
-      for (const l of this.links.values()) links.push(l.view(now));
-      const c = all.filter((n) => !n.external).length;
-      possible = c * (c - 1);
-    }
+    if (this.mode === 'mesh') for (const l of this.links.values()) links.push({ ...l.view(now), via: 'mesh' });
     for (const n of all) {
       if (this.mode !== 'gateway' && !n.external) continue;
       const ts = n.gwLink.lastContactTs;
       links.push({ from: n.id, to: 'gateway', state: n.gwLink.state, clockSync: null, offsetMs: null, lastHeartbeatTs: ts, misses: null, heartbeatAgeMs: ts === null ? null : now - ts });
-      possible += 1;
+    }
+    const topo = this.topology();
+    // Gateway mode: each cluster node's view of every other node, as the gateway's probes report it.
+    if (this.mode === 'gateway') {
+      for (const n of all) {
+        if (n.external) continue;
+        for (const p of all) if (p !== n) links.push(n.peerView(p.id, now));
+      }
     }
     const nodes = all.map((n) => n.view(now));
     return {
@@ -493,9 +524,13 @@ class Cluster {
       maxMessageBytes: 65536,
       nodes,
       links,
-      possibleLinks: possible,
-      openConnections: links.filter((l) => l.state === 'reachable').length,
-      metrics: { mesh: this.metrics.snapshot('mesh'), gateway: this.metrics.snapshot('gateway') },
+      possibleLinks: topo.possibleLinks,
+      openConnections: topo.openConnections,
+      metrics: {
+        mesh: this.metrics.snapshot('mesh'),
+        gateway: this.metrics.snapshot('gateway'),
+        lastRun: { mesh: this.metrics.runView('mesh', topo, now), gateway: this.metrics.runView('gateway', topo, now) },
+      },
       summary: summarize(nodes, links),
     };
   }

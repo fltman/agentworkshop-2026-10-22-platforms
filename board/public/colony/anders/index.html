@@ -20,9 +20,10 @@
       <div class="card">
         <h2>Mesh vs Gateway</h2>
         <table id="metrics"></table>
-        <div class="hint">Latency, throughput and error rate over a rolling window. Green is the better mode.</div>
+        <table id="lastrun"></table>
+        <div class="hint">Per-mode end-to-end results of the last run (farzad lastRun); live window when no run exists. Green is the better mode.</div>
       </div>
-      <div class="card">
+      <div class="card" id="controls">
         <h2>Controls</h2>
         <div class="row"><label>Mode</label>
           <button data-mode="mesh">Mesh</button><button data-mode="gateway">Gateway</button></div>

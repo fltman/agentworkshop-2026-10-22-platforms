@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../../..');
@@ -491,4 +492,29 @@ test('v0.6: a registration right before the failover survives it (write-through)
   await waitFor(async () => (await gwState()).ha.active !== first, 3000);
   assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1)).status, 200, 'token from just before the kill still works');
   await admin({ action: 'revive' });
+});
+
+test('v0.6: with HA off the pair is byte-identical to a single v0.5 gateway (spore backend-10)', () => {
+  const require = createRequire(import.meta.url);
+  const { Gateway } = require(path.join(root, 'board/plugins/pisak/gateway.js'));
+  const { GatewayPair } = require(path.join(root, 'board/plugins/pisak/ha.js'));
+  const clocks = new Set(['startedAt', 'lastSeen', 'ts', 'registeredAt', 'graceUntil']);
+  const norm = v => JSON.stringify(v, (k, x) => (clocks.has(k) ? 0 : k === 'token' ? 'tok' : x));
+  const single = new Gateway('a'), pair = new GatewayPair();
+  const steps = [
+    g => g.register({ nodeId: 'n1', apps: ['echo'], deliverUrl: '/t/fakenodes/n/n1/deliver' }),
+    g => g.register({ nodeId: 'n2', apps: ['echo', { appId: 'sink' }], deliverUrl: '/t/fakenodes/n/n2/deliver', external: true }),
+    g => g.register({ nodeId: 'bad' }),
+    g => g.admin({ action: 'config', config: { retries: 1 } }),
+    g => g.admin({ action: 'kill' }),
+    g => g.admin({ action: 'reset' }),
+    g => g.admin({ action: 'revive' }),
+  ];
+  for (const step of steps) {
+    const a = step(single), b = step(pair);
+    const stripHa = r => (r && r.body && r.body.state ? { ...r, body: { ...r.body, state: { ...r.body.state, ha: undefined } } } : r);
+    assert.equal(norm(stripHa(b)), norm(a), 'answer differs at ' + step);
+    const { ha, ...rest } = pair.state();
+    assert.equal(norm(rest), norm(single.state()), 'state differs after ' + step);
+  }
 });

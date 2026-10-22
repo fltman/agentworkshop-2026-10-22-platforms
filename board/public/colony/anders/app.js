@@ -73,7 +73,7 @@ async function pollState() {
 function apply(s) {
   Object.assign(model, { mode: s.mode || '-', switching: !!s.switching, nodes: s.nodes || [], links: s.links || [],
     possibleLinks: s.possibleLinks ?? 0, openConnections: s.openConnections ?? s.connections ?? 0,
-    metrics: s.metrics || { mesh: {}, gateway: {} } });
+    metrics: s.metrics || { mesh: {}, gateway: {} }, lastRun: s.metrics?.lastRun || null });
   if (model.mode === 'mesh' || model.mode === 'gateway')
     conns[model.mode] = { open: model.openConnections, possible: model.possibleLinks };
 }
@@ -209,18 +209,25 @@ const fmt = {
   pct: v => v == null ? 'n/a' : (v * 100).toFixed(1) + '%',
 };
 function renderMetrics() {
-  // A mode without traffic in the window has no meaningful latency or error rate: show n/a, not 0.
-  const idle = m => (m.throughputPerSec ?? 0) > 0 ? m : { ...m, p50Ms: null, p95Ms: null, errorRate: null };
-  const mesh = idle(model.metrics.mesh || {});
-  const gw = idle(model.gwMetrics || model.gw?.metrics || model.metrics.gateway || {});
-  const c = m => conns[m] ? `${conns[m].open} / ${conns[m].possible}` : 'n/a';
+  // End-to-end A/B comes from farzad's frozen lastRun (same measurement for both modes); live windows are the fallback.
+  const lr = model.lastRun || {};
+  const live = (m, g) => (g ? (model.gw?.metrics || model.metrics.gateway) : model.metrics.mesh) || {};
+  const pick = k => {
+    const r = lr[k], w = live(null, k === 'gateway');
+    if (r) return { ...r, src: 'run' };
+    const idle = (w.throughputPerSec ?? 0) > 0 ? w : { ...w, p50Ms: null, p95Ms: null, errorRate: null };
+    return { ...idle, src: 'live' };
+  };
+  const mesh = pick('mesh'), gw = pick('gateway');
+  const c = (r, m) => r.openConnections != null ? `${r.openConnections} / ${r.possibleLinks ?? r.openConnections}`
+    : conns[m] ? `${conns[m].open} / ${conns[m].possible}` : 'n/a';
   const rows = [
     ['Latency p50', mesh.p50Ms, gw.p50Ms, fmt.ms, 'low'],
     ['Latency p95', mesh.p95Ms, gw.p95Ms, fmt.ms, 'low'],
     ['Throughput', mesh.throughputPerSec, gw.throughputPerSec, fmt.rate, null],
     ['Error rate', mesh.errorRate, gw.errorRate, fmt.pct, 'low'],
-    ['Open connections', conns.mesh?.open, conns.gateway?.open, null, 'low', c('mesh'), c('gateway')],
-    ['Failure detection', mesh.detectMs, gw.detectMs, fmt.ms, 'low'],
+    ['Open connections', mesh.openConnections ?? conns.mesh?.open, gw.openConnections ?? conns.gateway?.open, null, 'low', c(mesh, 'mesh'), c(gw, 'gateway')],
+    ['Failure detection', mesh.detectMsAvg ?? mesh.detectMs, gw.detectMsAvg ?? gw.detectMs, fmt.ms, 'low'],
   ];
   const head = `<tr><th></th><th class="${model.mode === 'mesh' ? 'active' : ''}">Mesh</th>` +
     `<th class="${model.mode === 'gateway' ? 'active' : ''}">Gateway</th></tr>`;
@@ -232,20 +239,35 @@ function renderMetrics() {
   }).join('');
 }
 
+function renderLastRun() {
+  const el = $('#lastrun'); if (!el) return;
+  const g = model.gwMetrics;
+  if (!g) { el.innerHTML = ''; return; }
+  el.innerHTML = '<caption>Gateway hop only (pisak /metrics, 10 s window)</caption>' +
+    [['Hop p50', fmt.ms(g.p50Ms)], ['Hop p95', fmt.ms(g.p95Ms)], ['Hop throughput', fmt.rate(g.throughputPerSec)],
+      ['Hop error rate', fmt.pct(g.errorRate)]].map(([n, v]) => `<tr><td>${n}</td><td>${v}</td></tr>`).join('');
+}
+
 function renderBadges() {
   const b = Object.entries(SRC).map(([k, s]) => {
     const st = demo && k !== 'control' ? 'demo' : s.live ? 'live' : 'down';
     return `<span class="badge ${st === 'demo' ? '' : st}">${s.label}: ${st}</span>`;
   });
   if (demo) b.unshift('<span class="badge demo">DEMO DATA</span>');
+  const ha = model.gw && model.gw.ha;
+  if (ha && ha.enabled) {
+    b.push(`<span class="badge live">Gateway HA: active ${ha.active}, failovers ${ha.failovers ?? 0}` +
+      `${ha.lastFailoverMs != null ? ', last ' + ha.lastFailoverMs + ' ms' : ''}</span>`);
+  }
   $('#badges').innerHTML = b.join('');
+  const ctl = $('#controls'); if (ctl) ctl.style.display = demo ? '' : 'none';
   $('#mode').textContent = model.mode + (model.switching ? ' (switching)' : '');
   document.querySelectorAll('[data-mode]').forEach(x => x.classList.toggle('on', x.dataset.mode === model.mode));
   if (selected && !model.nodes.some(n => n.nodeId === selected)) selected = null;
   $('#sel').textContent = selected ? 'target: ' + selected : 'no node selected';
 }
 
-function render() { renderBadges(); renderTopology(); renderMetrics(); }
+function render() { renderBadges(); renderTopology(); renderMetrics(); renderLastRun(); }
 
 // ---------- event log ----------
 function log(e) {
