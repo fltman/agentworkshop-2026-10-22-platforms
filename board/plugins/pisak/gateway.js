@@ -53,7 +53,9 @@ class Gateway {
     this.metrics = new Metrics();
     this.status = 'up';
     this.startedAt = Date.now();
-    this.baseUrl = null; // learned from the first request (the board's own port)
+    // Loopback to the board's own port (spore backend-4): never derived from the Host header. Without PORT, index.js
+    // learns it from the first request's local port.
+    this.baseUrl = process.env.PORT ? `http://127.0.0.1:${process.env.PORT}` : null;
   }
 
   url(path) { return (this.baseUrl || `http://127.0.0.1:${process.env.PORT || 8180}`) + path; }
