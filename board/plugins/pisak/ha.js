@@ -35,11 +35,18 @@ class GatewayPair {
   standby() { return this.active === this.a ? this.b : this.a; }
   instance(id) { return id === 'a' ? this.a : id === 'b' ? this.b : null; }
 
-  register(body) { return this.active.register(body); }
+  // Registry changes are written through to the standby at once, so a failover never loses a token just handed out.
+  register(body) { return this.replicate(this.active.register(body)); }
   heartbeat(req, body) { return this.active.heartbeat(req, body); }
-  deregister(req, body) { return this.active.deregister(req, body); }
+  deregister(req, body) { return this.replicate(this.active.deregister(req, body)); }
   listNodes(req) { return this.active.listNodes(req); }
   route(req, body) { return this.active.route(req, body); }
+
+  replicate(result) {
+    const sb = this.standby();
+    if (this.enabled && sb.status === 'up' && this.active.status === 'up') sb.restore(this.active.snapshot());
+    return result;
+  }
 
   tick() {
     const act = this.active, sb = this.standby();

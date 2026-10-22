@@ -356,8 +356,8 @@ There are two gateway instances, `a` and `b`, in an active/standby pair behind t
   the standby takes over at once with an empty registry (this is not counted as a failover).
 - **Failover:** when the active is killed, node-facing calls answer `503 gateway_down` until `detectMs` has passed.
   Then the standby becomes active with the replicated registry: the same tokens work, and nobody registers again.
-  Registrations from the last 250 ms before the kill may be missing. Such a node gets `401` and registers again, as
-  it would after any restart.
+  Every `register` and `deregister` is also written through to the standby at once, so a token handed out just
+  before the kill still works after the failover.
 - **Not replicated:** circuit breakers, rate-limit buckets, in-flight requests and latency samples. The new active
   starts them fresh and probes every node itself. Events and metrics are shared, so the dashboard sees one stream.
 - **Fail back:** `revive` brings the dead instance back as the standby, resynced from the active.
