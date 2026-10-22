@@ -224,7 +224,9 @@ test('kill and revive the gateway', async () => {
   assert.equal((await post('/t/pisak/api/heartbeat', { nodeId: 'n1' }, t1)).status, 401, 'nodes re-register after revive');
   const t1b = await register('n1');
   await register('n2');
+  const routesBefore = (await get('/t/pisak/api/state')).body.routes;
   assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1b)).status, 200);
+  assert.equal((await admin({ action: 'reset' })).body.state.routes, routesBefore + 1, 'routes counts across reset');
 });
 
 test('state, metrics, events page and SSE stream share one event shape', async () => {

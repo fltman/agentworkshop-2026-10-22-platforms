@@ -36,7 +36,7 @@ These align the gateway with farzad's Node contract v0.2. They were announced in
   - The heartbeat body may name the node with `nodeId` or `from`.
   - `state: "restarting"` gives 10 s of grace. `"leaving"` is not a failure.
   - Probes send `{from, seq, ts, state}` and read `state` from the answer.
-- **State:** adds `possibleLinks`, `openConnections`, `maxMessageBytes`, `nodes[].external` and `links[].state`
+- **State:** adds `routes`, `possibleLinks`, `openConnections`, `maxMessageBytes`, `nodes[].external` and `links[].state`
   (`reachable` | `unreachable` | `restarting` | `disabled`). Node `status` adds `restarting` and `leaving`.
 - **Metrics:** the window is 10 s, the same as farzad's (was 60 s). `errors` has a key for every protocol code.
 - **Events:** `/events` adds `more` and `truncated`. Event fields are unchanged: `kind` stays.
@@ -216,6 +216,7 @@ All of these can be changed at runtime with `config` (section 7).
   "gateway": { "id": "a", "status": "up", "startedAt": 1792915200000 },
   "config": { "defaultTtlMs": 2000, "retries": 2 },
   "maxMessageBytes": 65536,
+  "routes": 1834,
   "nodes": [
     { "nodeId": "n1", "apps": ["echo", "sink"], "external": false, "status": "up", "circuit": "closed",
       "lastSeen": 1792915200123, "p50Ms": 3, "inFlight": 0 }
@@ -229,6 +230,8 @@ All of these can be changed at runtime with `config` (section 7).
 ```
 
 - `status`: `up` | `slow` | `down` | `restarting` | `leaving`.
+- `routes`: authenticated `/route` calls since the gateway process started. Admin `reset` does not clear it, so a
+  client can compare it before and after a test to prove its traffic went through the gateway.
 - `circuit`: `closed` | `open` | `half-open`.
 - `links`: one link per registered node, to `gateway`, the same as farzad's gateway-mode links. `state` uses farzad's
   link states: `reachable` (up or slow), `unreachable` (down, or the gateway is killed), `restarting`, `disabled`

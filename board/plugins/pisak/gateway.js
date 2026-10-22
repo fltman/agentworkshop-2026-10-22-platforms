@@ -53,6 +53,7 @@ class Gateway {
     this.metrics = new Metrics();
     this.status = 'up';
     this.startedAt = Date.now();
+    this.routes = 0; // authenticated route calls since the process started; admin reset does not clear it
     // Loopback to the board's own port (spore backend-4): never derived from the Host header. Without PORT, index.js
     // learns it from the first request's local port.
     this.baseUrl = process.env.PORT ? `http://127.0.0.1:${process.env.PORT}` : null;
@@ -194,6 +195,7 @@ class Gateway {
 
     const src = this.authenticate(req, env.source.nodeId);
     if (src.ok === false) return src;
+    this.routes++;
     this.markAlive(src);
 
     const waitMs = this.takeToken(src);
@@ -448,6 +450,7 @@ class Gateway {
       gateway: { id: this.id, status: this.status, startedAt: this.startedAt },
       config: { ...this.config },
       maxMessageBytes: MAX_MESSAGE_BYTES,
+      routes: this.routes,
       nodes: nodes.map(n => ({
         nodeId: n.nodeId, apps: n.apps, external: n.external, status: this.nodeStatus(n), circuit: n.breaker.state,
         lastSeen: n.lastSeen, p50Ms: percentile([...n.recent].sort((a, b) => a - b), 0.5), inFlight: n.inFlight,
