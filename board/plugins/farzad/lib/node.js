@@ -46,6 +46,7 @@ class VirtualNode {
     this.probeIntervalMs = 1000;
     this.gwLink = { state: 'disabled', lastContactTs: null };
     this.killTs = null;
+    this.joinStartTs = null;
     this.reportedDown = false;
     this.restartTimer = null;
     this.addApp('echo', null, {}, 'echo');

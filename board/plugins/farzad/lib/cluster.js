@@ -120,6 +120,7 @@ class Cluster {
     const n = new VirtualNode(`n${this.nextNode}`, external, (e) => this.emit(e));
     this.nextNode += 1;
     n.route = external || this.mode === 'gateway' ? 'gateway' : 'mesh';
+    if (!external) n.joinStartTs = Date.now();
     this.nodes.set(n.id, n);
     if (!external && this.mode === 'mesh') {
       for (const o of this.clusterNodes()) {
@@ -178,6 +179,7 @@ class Cluster {
     const a = this.nodes.get(link.from);
     const b = this.nodes.get(link.to);
     if (a) this.recompute(a);
+    if (to === 'reachable') { if (a) this.checkJoined(a); if (b) this.checkJoined(b); }
     if (!b) return;
     if (to === 'reachable' && b.reportedDown) {
       b.reportedDown = false;
@@ -193,6 +195,22 @@ class Cluster {
       }
       this.emit(ev);
     }
+  }
+
+  // Join time of a new cluster node: in mesh until its links to and from every up peer are reachable, in gateway
+  // mode until its registration is accepted.
+  checkJoined(n) {
+    if (n.joinStartTs === null || n.status !== 'up') return;
+    if (n.route === 'mesh') {
+      for (const o of this.clusterNodes()) {
+        if (o === n || o.status !== 'up') continue;
+        const out = this.links.get(`${n.id}>${o.id}`);
+        const back = this.links.get(`${o.id}>${n.id}`);
+        if (!out || out.state !== 'reachable' || !back || back.state !== 'reachable') return;
+      }
+    } else if (!n.token) return;
+    this.metrics.join(n.route, Date.now() - n.joinStartTs);
+    n.joinStartTs = null;
   }
 
   enabledFor(n) {
@@ -297,6 +315,7 @@ class Cluster {
     n.probeIntervalMs = r.probeIntervalMs;
     n.lastProbeTs = Date.now();
     this.setGwLink(n, 'reachable');
+    if (!n.external) this.checkJoined(n);
   }
 
   // The gateway lost us (for example after a revive) when its probes stopped for 3 intervals.
@@ -359,6 +378,8 @@ class Cluster {
     const from = this.mode;
     const topo = this.topology();
     this.switching = true;
+    // A join still in progress is not comparable across a mode switch.
+    for (const n of this.clusterNodes()) n.joinStartTs = null;
     try {
       const r = target === 'gateway' ? await this.toGateway(start, ep) : await this.toMesh(start, ep);
       if (ep === this.epoch && this.mode === target) {

@@ -294,8 +294,13 @@ class Sender {
     let to;
     if (type === 'broadcast') to = { nodeId: '*', appId: 'sink' };
     else {
-      // includeDown: killed and restarting nodes stay destinations, so a failure shows up in the error rate.
-      const dests = (t.includeDown ? all.filter((n) => n.status !== 'leaving') : cluster).filter((n) => n !== from);
+      // Like a real app, the generator only picks peers the sender can currently reach: a usable mesh link, or a
+      // peer registered with the gateway. includeDown: killed, restarting and joining nodes stay destinations, so
+      // a failure shows up in the error rate.
+      const reachable = (n) => (from.route === 'mesh'
+        ? USABLE.has((this.c.links.get(`${from.id}>${n.id}`) || {}).state)
+        : n.messaging === 'enabled');
+      const dests = (t.includeDown ? all.filter((n) => n.status !== 'leaving') : cluster.filter(reachable)).filter((n) => n !== from);
       if (!dests.length) return;
       to = { nodeId: dests[Math.floor(Math.random() * dests.length)].id, appId: type === 'request' ? 'echo' : 'sink' };
     }

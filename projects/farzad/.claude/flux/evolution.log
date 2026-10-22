@@ -19,3 +19,5 @@
 2026-10-22 12:15 DEPLOY: 1c2d592a-β gen-005 live via PR #20 (peer views 20/20 reachable in gateway mode, lastRun mesh+gateway present)
 2026-10-22 12:33 EVOLVE: 1c2d592a-β gen-006 started (comparability gene from cross-team audit: kill-to-down detection in both modes, single-flight register, fast-fail on gateway peer views)
 2026-10-22 12:38 EVOLVE: 1c2d592a-β gen-006 complete (40/40 fake, 40/40 pisak v0.6; kill-to-down detection both modes, single-flight register, fast-fail on gateway peer views, includeDown, lastRun kept, pair counts)
+2026-10-22 12:43 DEPLOY: 1c2d592a-β gen-006 live via PR #26 (pairs in state and lastRun verified, tile 200)
+2026-10-22 13:06 MUTATE: 1c2d592a-β gen-006 +join gene (generator skips joining peers by default, join time per mode in lastRun; dry run showed 30 NODE_UNAVAILABLE on scale-up; 42/42 fake, 42/42 pisak v0.7)

@@ -419,6 +419,34 @@ await check('MIN_NODES on delete', async () => {
   ok(r.status === 409 && r.body.error.code === 'MIN_NODES', `${r.status}`);
 });
 
+await check('scale-up under traffic: generator skips joining nodes, join time recorded in both modes', async () => {
+  await post(`${N}/api/reset`, { nodes: 5, mode: 'mesh' });
+  await until(async () => (await state()).openConnections === 20, 8000, 'mesh up');
+  await post(`${N}/api/traffic`, { rate: 40, mix: { request: 1 } });
+  await sleep(500);
+  await post(`${N}/api/nodes`, { count: 5 });
+  await until(async () => (await state()).openConnections === 90, 10000, 'openConnections 90');
+  await sleep(500);
+  await post(`${N}/api/traffic`, { rate: 0 });
+  await sleep(300);
+  let m = (await state()).metrics.lastRun.mesh;
+  ok(m.messages > 20, `mesh messages ${m.messages}`);
+  ok(!m.failures.NODE_UNAVAILABLE, `mesh failures ${JSON.stringify(m.failures)}`);
+  ok(m.joins >= 10 && isNum(m.joinMsAvg) && m.joinMsAvg > 0, `mesh joins ${m.joins} avg ${m.joinMsAvg}`);
+  const r = await post(`${N}/api/mode`, { mode: 'gateway' });
+  ok(r.status === 200, `mode ${r.status}`);
+  await post(`${N}/api/traffic`, { rate: 40, mix: { request: 1 } });
+  await sleep(500);
+  await post(`${N}/api/nodes`, { count: 3 });
+  await until(async () => (await state()).metrics.lastRun.gateway.joins >= 3, 8000, 'gateway joins');
+  await sleep(500);
+  await post(`${N}/api/traffic`, { rate: 0 });
+  await sleep(300);
+  m = (await state()).metrics.lastRun.gateway;
+  ok(!m.failures.NODE_UNAVAILABLE, `gateway failures ${JSON.stringify(m.failures)}`);
+  ok(isNum(m.joinMsAvg), `gateway joinMsAvg ${m.joinMsAvg}`);
+});
+
 await check('switch to gateway mode and route through it', async () => {
   await post(`${N}/api/reset`, { nodes: 5, mode: 'mesh' });
   await until(async () => (await state()).openConnections === 20, 8000, 'mesh up');

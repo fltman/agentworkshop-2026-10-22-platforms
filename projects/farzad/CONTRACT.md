@@ -170,7 +170,7 @@ A send from a `disabled` node is queued, not rejected. It goes out as soon as th
 | `POST /t/farzad/api/send` | see below | Makes one node send one message. |
 | `GET /t/farzad/api/requests/<requestId>` | | Result of an async request. |
 | `DELETE /t/farzad/api/requests/<requestId>` | | Aborts a pending request. No result is recorded after an abort. |
-| `POST /t/farzad/api/traffic` | `{"rate": 20, "mix": {"request": 0.6, "oneway": 0.3, "broadcast": 0.1}, "payloadBytes": 256, "includeDown": false}` | Built-in traffic generator. `{"rate": 0}` stops it. Senders are random `up` cluster nodes with messaging enabled. Destinations are the other `up` cluster nodes; with `"includeDown": true` (opt-in, default `false`) they also include `down` and `restarting` nodes, so a kill shows up in the error rate. The answer echoes the settings. |
+| `POST /t/farzad/api/traffic` | `{"rate": 20, "mix": {"request": 0.6, "oneway": 0.3, "broadcast": 0.1}, "payloadBytes": 256, "includeDown": false}` | Built-in traffic generator. `{"rate": 0}` stops it. Senders are random `up` cluster nodes with messaging enabled. Destinations are the other `up` cluster nodes the sender can reach (mesh: link `reachable` or `initializing`; gateway: peer messaging enabled), so nodes still joining are skipped; with `"includeDown": true` (opt-in, default `false`) they also include `down` and `restarting` nodes, so a kill shows up in the error rate. The answer echoes the settings. |
 | `POST /t/farzad/api/chaos` | see below | Fault injection on nodes. |
 
 Every node has the built-in applications `echo` (answers a request with its payload) and `sink` (accepts one-way
@@ -388,6 +388,9 @@ each mode's results over the whole time spent in it:
 - `messages`, `errorRate`, `throughputPerSec` (messages / duration) and `failures` (one code per failed send, the
   first failed code for a broadcast) cover the whole run. `p50Ms`/`p95Ms` come from a uniform reservoir sample of
   at most 2000 latencies per run. `detectMsAvg` averages the run's detections, `null` if none.
+- `joinMsAvg` (additive) averages how long nodes added during the run took to join, `null` if none; `joins` counts
+  them. A node has joined when, in mesh, all its links to and from `up` peers are `reachable`, and in gateway mode
+  when it has a token. The clock starts when the node is created. Nodes present at a mode switch are not counted.
 
 ### `GET /t/farzad/api/events?since=<seq>`
 
@@ -489,3 +492,8 @@ Compatible with 0.2: no field is renamed or removed, and defaults are unchanged.
   comes back in gateway mode is no longer remembered as reported down.
 - **lastRun** keeps a finished run with messages until the new run of that mode has traffic (section 5).
 - **`possiblePairs` / `openPairs`** in `/state` and in `lastRun` (section 5).
+- **Traffic skips joining peers** by default: a `request`/`oneway` destination must be reachable from the sender
+  (mesh: link `reachable` or `initializing`; gateway: peer messaging enabled), so a scale-up does not show up as
+  `NODE_UNAVAILABLE`. `includeDown: true` keeps the old behaviour. A `broadcast` still lists joining peers as
+  failed, as before.
+- **Join time**: `lastRun.<mode>.joinMsAvg` and `joins` (section 5).
