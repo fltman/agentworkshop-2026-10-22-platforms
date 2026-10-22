@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>platforms-tp control tile</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div>
+          <p class="eyebrow">NodeLink control</p>
+          <h1>Mesh vs Gateway</h1>
+        </div>
+        <div class="badge" id="modeBadge">mesh</div>
+      </header>
+
+      <section class="summary-grid">
+        <div class="stat">
+          <span class="label">Throughput</span>
+          <strong id="throughput">0</strong>
+          <small>msg/s</small>
+        </div>
+        <div class="stat">
+          <span class="label">p50</span>
+          <strong id="p50">0</strong>
+          <small>ms</small>
+        </div>
+        <div class="stat">
+          <span class="label">p95</span>
+          <strong id="p95">0</strong>
+          <small>ms</small>
+        </div>
+        <div class="stat">
+          <span class="label">Connections</span>
+          <strong id="connections">0</strong>
+          <small>open</small>
+        </div>
+      </section>
+
+      <section class="panel controls-panel">
+        <h2>Scenario controls</h2>
+        <div class="button-row">
+          <button data-action="toggle-mode">Toggle mode</button>
+          <button data-action="start-scenario">Run demo</button>
+          <button data-action="toggle-gateway">Gateway health</button>
+          <button data-action="toggle-ha">HA pair</button>
+          <button data-action="reset">Reset</button>
+        </div>
+        <div class="field-grid">
+          <label>
+            Traffic rate
+            <input id="rate" type="range" min="20" max="500" value="120" />
+          </label>
+          <label>
+            Payload size
+            <input id="payload" type="range" min="64" max="2048" step="64" value="256" />
+          </label>
+          <label>
+            Drop rate
+            <input id="dropRate" type="range" min="0" max="30" value="0" />
+          </label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Fault injection</h2>
+        <div class="button-row">
+          <button data-action="kill-node" data-node="2">Kill node 2</button>
+          <button data-action="slow-node" data-node="3">Slow node 3</button>
+          <button data-action="drop-messages">Drop messages</button>
+        </div>
+      </section>
+
+      <section class="panel status-panel">
+        <h2>Current scenario</h2>
+        <div class="status-row"><span>Mode</span><strong id="modeLabel">mesh</strong></div>
+        <div class="status-row"><span>Nodes</span><strong id="nodeCount">0</strong></div>
+        <div class="status-row"><span>Gateway</span><strong id="gatewayStatus">healthy</strong></div>
+        <div class="status-row"><span>Chaos</span><strong id="chaosStatus">steady</strong></div>
+        <div class="status-row"><span>Scenario</span><strong id="scenarioStep">ready</strong></div>
+      </section>
+
+      <section class="panel event-panel">
+        <h2>Recent events</h2>
+        <ul id="events"></ul>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
