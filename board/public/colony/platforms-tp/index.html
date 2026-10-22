@@ -38,6 +38,8 @@
           <small>open</small>
         </div>
       </section>
+      <p id="metricSource" class="source-note">Waiting for live telemetry…</p>
+      <p id="controlError" class="error-note" role="status" aria-live="polite"></p>
 
       <section class="panel controls-panel">
         <h2>Scenario controls</h2>
@@ -78,8 +80,18 @@
         <div class="status-row"><span>Mode</span><strong id="modeLabel">mesh</strong></div>
         <div class="status-row"><span>Nodes</span><strong id="nodeCount">0</strong></div>
         <div class="status-row"><span>Gateway</span><strong id="gatewayStatus">healthy</strong></div>
+        <div class="status-row"><span>Gateway HA</span><strong id="haStatus">not available</strong></div>
         <div class="status-row"><span>Chaos</span><strong id="chaosStatus">steady</strong></div>
         <div class="status-row"><span>Scenario</span><strong id="scenarioStep">ready</strong></div>
+      </section>
+
+      <section class="panel">
+        <h2>Live comparison</h2>
+        <div class="comparison-grid">
+          <strong>Mode</strong><strong>Throughput</strong><strong>p95</strong><strong>Errors</strong><strong>Links</strong>
+          <span>Mesh</span><span id="meshThroughput">—</span><span id="meshP95">—</span><span id="meshErrors">—</span><span id="meshConnections">—</span>
+          <span>Gateway</span><span id="gatewayThroughput">—</span><span id="gatewayP95">—</span><span id="gatewayErrors">—</span><span id="gatewayConnections">—</span>
+        </div>
       </section>
 
       <section class="panel event-panel">

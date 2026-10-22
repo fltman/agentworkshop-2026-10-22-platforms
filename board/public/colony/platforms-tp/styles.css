@@ -59,6 +59,17 @@ h1 {
   grid-template-columns: repeat(4, minmax(110px, 1fr));
   gap: 12px;
 }
+.source-note {
+  margin: -8px 2px 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.error-note {
+  min-height: 1.4em;
+  margin: -12px 2px 0;
+  color: var(--danger);
+  font-size: 0.9rem;
+}
 .stat, .panel {
   background: var(--panel);
   border: 1px solid var(--panel-border);
@@ -139,6 +150,21 @@ input[type="range"] {
 }
 .status-row span { color: var(--muted); }
 .status-row strong { color: var(--text); }
+.comparison-grid {
+  display: grid;
+  grid-template-columns: 1.2fr repeat(4, 1fr);
+  gap: 10px;
+  align-items: center;
+  overflow-x: auto;
+}
+.comparison-grid > :nth-child(-n+5) {
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.comparison-grid span { white-space: nowrap; }
+button:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
 .event-panel ul {
   margin: 0;
   padding-left: 18px;
@@ -151,6 +177,7 @@ input[type="range"] {
 }
 @media (max-width: 700px) {
   .summary-grid, .field-grid { grid-template-columns: 1fr 1fr; }
+  .comparison-grid { min-width: 540px; }
 }
 @media (max-width: 470px) {
   .summary-grid, .field-grid { grid-template-columns: 1fr; }

@@ -7,8 +7,19 @@ const els = {
   modeLabel: document.getElementById('modeLabel'),
   nodeCount: document.getElementById('nodeCount'),
   gatewayStatus: document.getElementById('gatewayStatus'),
+  haStatus: document.getElementById('haStatus'),
   chaosStatus: document.getElementById('chaosStatus'),
   scenarioStep: document.getElementById('scenarioStep'),
+  metricSource: document.getElementById('metricSource'),
+  controlError: document.getElementById('controlError'),
+  meshThroughput: document.getElementById('meshThroughput'),
+  meshP95: document.getElementById('meshP95'),
+  meshErrors: document.getElementById('meshErrors'),
+  meshConnections: document.getElementById('meshConnections'),
+  gatewayThroughput: document.getElementById('gatewayThroughput'),
+  gatewayP95: document.getElementById('gatewayP95'),
+  gatewayErrors: document.getElementById('gatewayErrors'),
+  gatewayConnections: document.getElementById('gatewayConnections'),
   rate: document.getElementById('rate'),
   payload: document.getElementById('payload'),
   dropRate: document.getElementById('dropRate'),
@@ -16,10 +27,17 @@ const els = {
 };
 
 async function loadState() {
-  const res = await fetch('/t/platforms-tp/api/state');
-  if (!res.ok) return;
-  const state = await res.json();
-  renderState(state);
+  try {
+    const res = await fetch('/t/platforms-tp/api/state');
+    if (!res.ok) throw new Error(`State request failed (HTTP ${res.status}).`);
+    renderState(await res.json());
+  } catch (err) {
+    els.controlError.textContent = err.message;
+  }
+}
+
+function displayMetric(value, suffix = '') {
+  return value === null || value === undefined ? '—' : `${value}${suffix}`;
 }
 
 function renderState(state) {
@@ -31,11 +49,29 @@ function renderState(state) {
   els.connections.textContent = state.metrics.openConnections;
   els.nodeCount.textContent = state.nodeCount;
   els.gatewayStatus.textContent = state.gateway.healthy ? 'healthy' : 'down';
+  els.haStatus.textContent = state.gateway.ha
+    ? (state.gateway.ha.enabled ? `active (${state.gateway.ha.failovers || 0} failovers)` : 'off')
+    : 'not available';
   els.chaosStatus.textContent = state.chaos.dropRate > 0 || state.chaos.nodeKilled !== null ? 'fault injected' : 'steady';
   els.scenarioStep.textContent = state.scenario.step;
   els.rate.value = state.traffic.rate;
   els.payload.value = state.traffic.payloadBytes;
   els.dropRate.value = state.chaos.dropRate;
+  els.metricSource.textContent = state.source === 'live'
+    ? 'Live NodeLink telemetry'
+    : `Simulation fallback${state.liveError ? ` — ${state.liveError}` : ''}`;
+  for (const control of document.querySelectorAll('button, input[type="range"]')) {
+    control.disabled = Boolean(state.running);
+  }
+
+  const results = state.scenario.results || {};
+  for (const [mode, prefix] of [['mesh', 'mesh'], ['gateway', 'gateway']]) {
+    const result = results[mode];
+    els[`${prefix}Throughput`].textContent = displayMetric(result?.throughput, ' msg/s');
+    els[`${prefix}P95`].textContent = displayMetric(result?.latencyP95, ' ms');
+    els[`${prefix}Errors`].textContent = displayMetric(result?.errorRate);
+    els[`${prefix}Connections`].textContent = displayMetric(result?.openConnections);
+  }
 
   if (Array.isArray(state.events)) {
     els.events.innerHTML = '';
@@ -49,15 +85,23 @@ function renderState(state) {
 }
 
 async function sendAction(action, extra = {}) {
-  const payload = { action, ...extra };
-  const res = await fetch('/t/platforms-tp/api/control', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) return;
-  const data = await res.json();
-  renderState(data.state);
+  els.controlError.textContent = '';
+  try {
+    const payload = { action, ...extra };
+    const res = await fetch('/t/platforms-tp/api/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      if (data.state) renderState(data.state);
+      throw new Error(data.error || `Control request failed (HTTP ${res.status}).`);
+    }
+    renderState(data.state);
+  } catch (err) {
+    els.controlError.textContent = err.message;
+  }
 }
 
 for (const button of document.querySelectorAll('button')) {
