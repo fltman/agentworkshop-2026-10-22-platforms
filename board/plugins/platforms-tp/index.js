@@ -109,6 +109,49 @@ function recordEvent(state, dataDir, type, text) {
   writeEvents(dataDir, nextEvents);
 }
 
+class GatewayAdminError extends Error {
+  constructor(message, status = 502, state = null) {
+    super(message);
+    this.status = status;
+    this.state = state;
+  }
+}
+
+async function gatewayAdmin(action) {
+  const port = Number(process.env.PORT || 8180);
+  const url = new URL('/t/pisak/api/admin', `http://127.0.0.1:${port}`);
+  let response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action }),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch (err) {
+    throw new GatewayAdminError(`Gateway admin request failed: ${err.message}`);
+  }
+
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new GatewayAdminError(`Gateway admin returned invalid JSON (HTTP ${response.status}).`);
+  }
+
+  if (!response.ok || result?.ok !== true) {
+    throw new GatewayAdminError(result?.error?.message || `Gateway admin returned HTTP ${response.status}.`);
+  }
+
+  return result.state || null;
+}
+
+function syncGatewayHealth(state, gatewayState) {
+  const status = gatewayState?.gateway?.status ?? gatewayState?.status;
+  if (status === 'down') state.gateway.healthy = false;
+  else if (status === 'up') state.gateway.healthy = true;
+}
+
 function simulateMetrics(state) {
   const baseRate = Number(state.traffic.rate || 0);
   const dropRatio = clamp(Number(state.chaos.dropRate ?? state.traffic.dropRate ?? 0), 0, 100) / 100;
@@ -133,9 +176,20 @@ function simulateMetrics(state) {
   };
 }
 
-function applyAction(state, dataDir, action, payload={}) {
+async function applyAction(state, dataDir, action, payload={}) {
   switch (action) {
     case 'toggle-mode': {
+      if (state.mode === 'mesh') {
+        const gatewayState = await gatewayAdmin('reset');
+        syncGatewayHealth(state, gatewayState);
+        if (!state.gateway.healthy) {
+          state.scenario.step = 'gateway down';
+          recordEvent(state, dataDir, 'gateway', 'Gateway remains down after reset; gateway mode was not started');
+          simulateMetrics(state);
+          state.updatedAt = new Date().toISOString();
+          throw new GatewayAdminError('Gateway is down; cannot switch to gateway mode.', 503, state);
+        }
+      }
       state.mode = state.mode === 'mesh' ? 'gateway' : 'mesh';
       state.scenario.step = state.mode === 'mesh' ? 'mesh active' : 'gateway active';
       recordEvent(state, dataDir, 'mode', `Mode switched to ${state.mode}`);
@@ -183,7 +237,13 @@ function applyAction(state, dataDir, action, payload={}) {
       break;
     }
     case 'toggle-gateway': {
-      state.gateway.healthy = !state.gateway.healthy;
+      const action = state.gateway.healthy ? 'kill' : 'revive';
+      const gatewayState = await gatewayAdmin(action);
+      syncGatewayHealth(state, gatewayState);
+      const status = gatewayState?.gateway?.status ?? gatewayState?.status;
+      if (status !== 'up' && status !== 'down') {
+        state.gateway.healthy = action === 'revive';
+      }
       state.scenario.step = state.gateway.healthy ? 'gateway healthy' : 'gateway down';
       recordEvent(state, dataDir, 'gateway', `Gateway ${state.gateway.healthy ? 'recovered' : 'killed'}`);
       break;
@@ -195,7 +255,15 @@ function applyAction(state, dataDir, action, payload={}) {
       break;
     }
     case 'reset': {
+      const previousHealth = state.gateway.healthy;
+      const gatewayState = await gatewayAdmin('reset');
+      const status = gatewayState?.gateway?.status ?? gatewayState?.status;
       const fresh = defaultState();
+      fresh.gateway.healthy = status === 'down'
+        ? false
+        : status === 'up'
+          ? true
+          : previousHealth;
       Object.assign(state, fresh);
       recordEvent(state, dataDir, 'scenario', 'System reset to baseline');
       break;
@@ -285,14 +353,15 @@ module.exports = {
       }
 
       try {
-        const nextState = applyAction(readState(dataDir), dataDir, action, payload);
+        const nextState = await applyAction(readState(dataDir), dataDir, action, payload);
         writeState(dataDir, nextState);
         res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ ok: true, state: nextState }));
         return true;
       } catch (err) {
-        res.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ error: err.message || 'Bad request' }));
+        if (err.state) writeState(dataDir, err.state);
+        res.writeHead(err.status || 400, { 'content-type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ error: err.message || 'Bad request', ...(err.state ? { state: err.state } : {}) }));
         return true;
       }
     }

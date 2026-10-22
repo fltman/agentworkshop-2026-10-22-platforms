@@ -63,6 +63,8 @@ Supported actions:
 - `toggle-ha` — enable or disable HA mode
 - `reset` — restore default values
 
+Gateway actions are forwarded to Pisak's `POST /t/pisak/api/admin` over loopback. `toggle-gateway` sends `kill` or `revive`; `reset` sends `reset`, which clears gateway state without reviving a killed gateway. Switching from mesh to gateway sends `reset` first and returns `503` if the gateway remains down. If the gateway API is unavailable, the control request returns `502` and does not apply the local action.
+
 Example request:
 
 ```json

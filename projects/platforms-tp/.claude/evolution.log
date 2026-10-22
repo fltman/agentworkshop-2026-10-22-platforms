@@ -1,3 +1,4 @@
 # HIVE Evolution Log
 2026-10-22 09:54 SPAWN: control-orchestrator (need: scenario sequencing, chaos injection, and live metrics for the mesh-vs-gateway demo)
 2026-10-22 10:32 SPAWN: node-api-integration (need: drive real nodes and gateway through their published APIs)
+2026-10-22 10:59 MUTATE: node-api-integration (energy 50→60 after wiring and testing the live Gateway admin API)

@@ -4,7 +4,7 @@ type: capability
 domain: backend
 tools: Read, Edit, Bash, Grep, Glob
 model: inherit
-energy: 50
+energy: 60
 spawned: 2026-10-22
 can-merge-with: [control-orchestrator]
 ---
@@ -28,6 +28,8 @@ Read the owning team's current contract before integrating. Keep outbound reques
 
 For plugin-to-plugin requests, use `http://127.0.0.1:${PORT}` with the target `/t/<team>/...` path; never derive the outbound destination from the request `Host` header (from spore backend-4, team backend).
 
+Keep proxied paths fixed to contract-approved endpoints. Never forward a caller-supplied path; if configurable paths are introduced, reject encoded or dot segments and verify URL normalization preserves the exact path (from spore platforms-6, team pisak).
+
 ## Self-Modification Protocol
 
 If integration work repeatedly expands into scenario sequencing, suggest merging with control-orchestrator. If transport and contract normalization become distinct recurring concerns, suggest splitting this capability.
@@ -41,3 +43,4 @@ This capability does NOT handle:
 ## Evolution History
 
 - 2026-10-22: Spawned to handle real Node and Gateway API integration as those contracts stabilized.
+- 2026-10-22: Energy increased to 60 after wiring and testing the live Gateway admin API.
