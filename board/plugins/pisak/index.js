@@ -2,13 +2,13 @@
 // Team pisak: NodeLink gateway (module B). Mounted at /t/pisak/. Contract: projects/pisak/CONTRACT.md.
 // Plain Node, no dependencies. Every timer callback is guarded: this process hosts every team's plugin.
 
-const { Gateway } = require('./gateway');
+const { GatewayPair } = require('./ha');
 
 const MAX_BODY = 1 << 20;
 const TICK_MS = 250;
 const SSE_PING_MS = 15000;
 
-const gw = new Gateway('a');
+const gw = new GatewayPair();
 let timer = null;
 
 function send(res, out) {
@@ -51,7 +51,7 @@ function info() {
   return {
     status: 200,
     body: {
-      service: 'NodeLink gateway', team: 'pisak', contract: 'v0.5', gateway: gw.id, status: gw.status,
+      service: 'NodeLink gateway', team: 'pisak', contract: 'v0.6', gateway: gw.id, status: gw.status,
       endpoints: ['POST /api/register', 'POST /api/heartbeat', 'POST /api/deregister', 'GET /api/nodes', 'POST /api/route',
         'GET /api/state', 'GET /api/metrics', 'GET /api/events?since=<seq>&limit=<n>', 'GET /api/events/stream', 'POST /api/admin'],
     },
