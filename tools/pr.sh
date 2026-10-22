@@ -64,7 +64,13 @@ fi
 echo "→ branch $branch"
 
 # 3. only your files
-paths=(); for p in "projects/$team" "board/plugins/$team" "board/public/colony/$team"; do [ -e "$p" ] && paths+=("$p"); done
+# A path also counts if it is tracked in HEAD's tree, not just present on disk: a team that deletes its ENTIRE
+# colony or plugin folder leaves nothing for [ -e ] to find, so the deletion was silently never staged
+# (found and fixed by a team at the workshop on 2026-10-22).
+tracked() { git ls-tree -r HEAD --name-only -- "$1" 2>/dev/null | grep -q .; }
+paths=(); for p in "projects/$team" "board/plugins/$team" "board/public/colony/$team"; do
+  { [ -e "$p" ] || tracked "$p"; } && paths+=("$p")
+done
 [ ${#paths[@]} -gt 0 ] || { echo "Found no files for team \"$team\". Does projects/$team/ or board/plugins/$team/ exist? The team name is the folder's name." >&2; exit 1; }
 [ -e "board/plugins/$team/index.js" ] || echo "  note: no backend yet (board/plugins/$team/index.js). That is fine, but your tile can't listen to The Square without it."
 [ -e "board/public/colony/$team/index.html" ] || echo "  note: no frontend yet (board/public/colony/$team/index.html). Then your team has no tile in the colony (/colony)."
@@ -95,7 +101,9 @@ fi
 # password it cannot read and stops with "unable to get password". gh auth setup-git wires gh in, once.
 gh auth setup-git >/dev/null 2>&1 || true
 echo "→ pushing to $remote"
-if ! git push -q -u "$remote" "$branch"; then
+# The branch lives only in your own fork, so if it was recreated locally (non-fast-forward), overwrite it there:
+# --force-with-lease refuses if someone else pushed to it in the meantime.
+if ! git push -q -u "$remote" "$branch" 2>/dev/null && ! git push -q -u --force-with-lease "$remote" "$branch"; then
   echo "Push to $remote failed. If git asked for a password: run  gh auth setup-git  and then this command again." >&2
   exit 1
 fi

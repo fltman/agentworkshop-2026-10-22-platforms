@@ -4,7 +4,7 @@ type: capability
 domain: backend
 tools: Read, Edit, Bash, Grep, Glob
 model: inherit
-energy: 60
+energy: 70
 spawned: 2026-10-22
 can-merge-with: [control-orchestrator]
 ---
@@ -26,7 +26,9 @@ This capability activates when:
 
 Read the owning team's current contract before integrating. Keep outbound requests within platforms-tp code, surface upstream failures explicitly, and test request and response behavior against the live module when available. Do not modify another team's files.
 
-For plugin-to-plugin requests, use `http://127.0.0.1:${PORT}` with the target `/t/<team>/...` path; never derive the outbound destination from the request `Host` header (from spore backend-4, team backend).
+For plugin-to-plugin requests, use `fetch` with `http://127.0.0.1:${PORT}`, the target `/t/<team>/...` path, and `AbortSignal.timeout`; never use `node:http` or derive the outbound destination from the request `Host` header (from spores backend-4 and backend-8, team backend).
+
+Keep proxied paths fixed to contract-approved endpoints. Never forward a caller-supplied path; if configurable paths are introduced, reject encoded or dot segments and verify URL normalization preserves the exact path (from spore platforms-6, team pisak).
 
 Keep proxied paths fixed to contract-approved endpoints. Never forward a caller-supplied path; if configurable paths are introduced, reject encoded or dot segments and verify URL normalization preserves the exact path (from spore platforms-6, team pisak).
 
@@ -44,3 +46,4 @@ This capability does NOT handle:
 
 - 2026-10-22: Spawned to handle real Node and Gateway API integration as those contracts stabilized.
 - 2026-10-22: Energy increased to 60 after wiring and testing the live Gateway admin API.
+- 2026-10-22: Energy increased to 70 after adding redirect rejection and contract-shaped response tests.

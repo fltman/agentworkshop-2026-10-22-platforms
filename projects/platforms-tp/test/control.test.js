@@ -57,6 +57,7 @@ test('toggle-gateway calls the local Pisak admin API and syncs its state', async
     assert.equal(target.port, '17891');
     assert.equal(target.pathname, '/t/pisak/api/admin');
     assert.equal(options.method, 'POST');
+    assert.equal(options.redirect, 'manual');
     assert.deepEqual(JSON.parse(options.body), { action: 'kill' });
     return responseWithGatewayStatus('down');
   };
@@ -64,6 +65,21 @@ test('toggle-gateway calls the local Pisak admin API and syncs its state', async
   const result = await control('toggle-gateway');
   assert.equal(result.status, 200);
   assert.equal(result.body.state.gateway.healthy, false);
+});
+
+test('gateway admin redirects are rejected without following them', async () => {
+  global.fetch = async (_url, options) => {
+    assert.equal(options.redirect, 'manual');
+    return {
+      ok: false,
+      status: 307,
+      json: async () => assert.fail('redirect response must not be parsed'),
+    };
+  };
+
+  const result = await control('toggle-gateway');
+  assert.equal(result.status, 502);
+  assert.match(result.body.error, /unexpected redirect/);
 });
 
 test('reset preserves a killed gateway', async () => {
