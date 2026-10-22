@@ -1,0 +1,65 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #0f1419; color: #dde3ea; font: 13px/1.35 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { padding: 8px 12px 4px; }
+h1 { font-size: 16px; margin: 0; }
+h1 .sub { font-size: 12px; color: #8a98b3; font-weight: normal; }
+h2 { font-size: 13px; margin: 0 0 6px; }
+h3 { font-size: 12px; margin: 0 0 4px; color: #aab; }
+.hint { color: #7d8aa3; font-weight: normal; font-size: 11px; }
+.err { color: #ff8080; min-height: 0; }
+.summary { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; }
+.summary b { color: #fff; }
+.summary .mode-mesh { color: #7fd1ff; }
+.summary .mode-gateway { color: #ffb454; }
+
+main { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 12px 12px; align-items: flex-start; }
+.card { background: #151c25; border: 1px solid #263243; border-radius: 6px; padding: 8px; flex: 1 1 300px; min-width: 0; }
+.card.wide { flex-basis: 100%; }
+#matrixCard { flex: 2 1 340px; }
+
+.matrixWrap { overflow: auto; max-width: 100%; }
+.matrix { border-collapse: separate; border-spacing: 2px; }
+.matrix th { font-weight: normal; font-size: 10px; color: #9aa7bd; padding: 0 2px; white-space: nowrap; }
+.matrix thead th { height: 14px; }
+.matrix th.row { text-align: right; }
+.matrix th.row button { all: unset; cursor: pointer; padding: 0 4px; border-radius: 3px; font-size: 11px; color: #dde3ea; }
+.matrix th.row button:hover, .matrix th.row button:focus-visible { background: #263243; }
+.matrix th.row.sel button { background: #2f4a6b; color: #fff; }
+.matrix th.row.st-down button { color: #ff8080; text-decoration: line-through; }
+.matrix th.row.st-restarting button, .matrix th.row.st-leaving button { color: #ffd166; }
+.matrix th.row .ext { color: #c49bff; font-size: 9px; margin-left: 2px; }
+.matrix td { width: 16px; height: 16px; min-width: 16px; border-radius: 3px; text-align: center; font-size: 10px; line-height: 16px; color: #000; padding: 0; }
+.matrix td.gw { width: 28px; }
+
+.s-reachable { background: #3fbf7f; }
+.s-initializing { background: #4aa3ff; }
+.s-restarting { background: #ffc145; }
+.s-unreachable { background: #ff5c5c; }
+.s-disabled { background: #4a5263; }
+.s-self { background: repeating-linear-gradient(45deg, #1d2633 0 3px, #263243 3px 6px); }
+.s-none { background: transparent; outline: 1px dashed #2c3747; outline-offset: -1px; }
+.s-unknown { background: #8a6cff; }
+.oos { font-weight: bold; color: #fff; text-shadow: 0 0 2px #000; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font-size: 11px; color: #9aa7bd; }
+.legend span.sw, .internals span.sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 3px; text-align: center; font-size: 9px; line-height: 12px; }
+
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin-bottom: 6px; }
+.kv dt { color: #8a98b3; }
+.kv dd { margin: 0; }
+.bad { color: #ff8080; } .ok { color: #5fd7a7; } .warn { color: #ffd166; }
+.bar { display: inline-block; width: 90px; height: 8px; background: #263243; border-radius: 4px; vertical-align: middle; margin-right: 6px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: #3fbf7f; }
+.bar.hot > i { background: #ff5c5c; }
+.apps { margin: 0 0 6px; padding-left: 16px; }
+.apps li { margin: 1px 0; }
+.apps .lid { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: #c49bff; }
+.internals { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.internals > span { white-space: nowrap; }
+.internals b { color: #fff; }
+.chip { display: inline-block; border-radius: 3px; padding: 0 5px; margin-left: 3px; font-size: 11px; background: #a3333d; color: #fff; }
+.mini { border-collapse: collapse; margin-bottom: 6px; font-size: 11px; }
+.mini th, .mini td { padding: 1px 6px; text-align: right; border-bottom: 1px solid #222d3c; }
+.mini th { color: #8a98b3; font-weight: normal; }
+.mini th:first-child, .mini td:first-child { text-align: left; }
+.mini td i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }

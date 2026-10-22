@@ -47,7 +47,7 @@ async function waitFor(fn, ms = 6000) {
 async function fresh(config = {}) {
   await admin({ action: 'revive' });
   await admin({ action: 'reset' });
-  for (const id of ['n1', 'n2', 'n3', 'x1']) await chaos({ nodeId: id, killed: false, delayMs: 0, fail503: false, failWith: null, state: 'up' });
+  for (const id of ['n1', 'n2', 'n3', 'x1']) await chaos({ nodeId: id, killed: false, delayMs: 0, fail503: false, failWith: null, state: 'up', redirect: null });
   if (Object.keys(config).length) assert.equal((await admin({ action: 'config', config })).status, 200);
 }
 
@@ -348,4 +348,44 @@ test('v0.3: event paging reports more and truncated', async () => {
   const q = (await get(`/t/pisak/api/events?since=${p.seq}&limit=200`)).body;
   assert.equal(q.more, false);
   assert.equal(q.events[0].seq, p.seq + 1);
+});
+
+test('v0.4: redirects are never followed, not on delivery and not on probes', async () => {
+  await fresh({ retries: 2, probeIntervalMs: 100, probeTimeoutMs: 400 });
+  const t1 = await register('n1');
+  await register('n2');
+  await register('n3');
+  const count = async () => ((await get('/t/fakenodes/received')).body.n3 || []).length;
+  const before = await count();
+  await chaos({ nodeId: 'n2', redirect: 'n3' });
+  const r = await post('/t/pisak/api/route', env('n1', 'n2'), t1);
+  assert.equal(r.status, 503);
+  assert.equal(r.body.error.code, 'NODE_UNAVAILABLE');
+  assert.equal(r.body.error.reason, 'bad_response');
+  assert.equal(await count(), before, 'the redirect target got nothing');
+  // n3 answers its heartbeat, so n2 only goes down if the probe refuses to follow the 307 to n3.
+  await waitFor(async () => (await get('/t/pisak/api/state')).body.nodes.find(x => x.nodeId === 'n2').status === 'down');
+  assert.equal((await get('/t/pisak/api/state')).body.nodes.find(x => x.nodeId === 'n3').status, 'up');
+});
+
+test('v0.4: a tiny ttlMs is raised to 50 ms and sender-budget timeouts do not open the breaker', async () => {
+  await fresh({ retries: 0, breakerFailures: 2, defaultTtlMs: 300, rateLimitPerSec: 1000, rateLimitBurst: 1000 });
+  const t1 = await register('n1');
+  await register('n2');
+  const ok = await post('/t/pisak/api/route', env('n1', 'n2', { ttlMs: 0.5 }), t1);
+  assert.equal(ok.status, 200, 'a 0.5 ms ttl is raised to the 50 ms minimum');
+
+  await chaos({ nodeId: 'n2', delayMs: 120 });
+  for (let i = 0; i < 4; i++) {
+    const r = await post('/t/pisak/api/route', env('n1', 'n2', { ttlMs: 60 }), t1);
+    assert.equal(r.body.error.code, 'TIMEOUT', JSON.stringify(r.body));
+  }
+  const circuit = async () => (await get('/t/pisak/api/state')).body.nodes.find(x => x.nodeId === 'n2').circuit;
+  assert.equal(await circuit(), 'closed', 'short sender budgets are not the receiver\'s fault');
+  await chaos({ nodeId: 'n2', delayMs: 0 });
+  assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1)).status, 200);
+
+  await chaos({ nodeId: 'n2', delayMs: 500 });
+  for (let i = 0; i < 2; i++) assert.equal((await post('/t/pisak/api/route', env('n1', 'n2'), t1)).body.error.code, 'TIMEOUT');
+  assert.equal(await circuit(), 'open', 'timeouts within the gateway default ttl still count');
 });

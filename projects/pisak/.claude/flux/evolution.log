@@ -3,3 +3,5 @@
 2026-10-22 10:30 TERMINATE: 508b820a-β at gen-001 (pull fallback made redundant: farzad agreed to gateway probes and nodes are same-origin)
 2026-10-22 10:30 EVOLVE: 508b820a α gen-002 (probe sweeper, contract v0.2, bold 0.5), γ gen-002 (probe events projected, methodical 0.6)
 2026-10-22 10:50 SELECT: 508b820a-α wins (fitness 80 vs γ 25, built and tested gateway plugin v0.3, PR #7), γ to the graveyard
+2026-10-22 11:15 EXPLORE: c1f74c17 "gateway must not trust peers or senders" (2 timelines: α call-site guards + budget-aware breaker, β one safeFetch policy layer; second problem of this kind after path traversal)
+2026-10-22 11:20 SELECT: c1f74c17-α wins (fitness 86 vs β 20, redirect manual + 50 ms ttl floor + budget-aware breaker, 15/15 tests), β to the graveyard (revive if a third outbound call appears)

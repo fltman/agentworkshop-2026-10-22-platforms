@@ -51,7 +51,7 @@ function info() {
   return {
     status: 200,
     body: {
-      service: 'NodeLink gateway', team: 'pisak', contract: 'v0.3', gateway: gw.id, status: gw.status,
+      service: 'NodeLink gateway', team: 'pisak', contract: 'v0.4', gateway: gw.id, status: gw.status,
       endpoints: ['POST /api/register', 'POST /api/heartbeat', 'POST /api/deregister', 'GET /api/nodes', 'POST /api/route',
         'GET /api/state', 'GET /api/metrics', 'GET /api/events?since=<seq>&limit=<n>', 'GET /api/events/stream', 'POST /api/admin'],
     },

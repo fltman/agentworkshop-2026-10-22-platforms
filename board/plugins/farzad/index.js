@@ -4,6 +4,7 @@ const path = require('path');
 const E = require(path.join(__dirname, 'lib', 'envelope.js'));
 const { Cluster, MAX_NODES, guard } = require(path.join(__dirname, 'lib', 'cluster.js'));
 const { Sender } = require(path.join(__dirname, 'lib', 'sender.js'));
+const { INFLIGHT_LIMIT } = require(path.join(__dirname, 'lib', 'node.js'));
 
 const BODY_CAP = 1 << 20;
 const HOLD_MS = 30000;
@@ -67,17 +68,32 @@ async function receiveChaos(n, req, res) {
 async function nodeEndpoint(req, res, nodeId, what) {
   const n = cluster.nodes.get(nodeId);
   if (!n) { fail(res, E.error('UNKNOWN_NODE', 'node', `no node ${nodeId}`)); return; }
-  if (!(await receiveChaos(n, req, res))) return;
-  const { buf, size } = await readRaw(req);
-  if (what === 'heartbeat') {
-    const receivedTs = n.now();
-    let body = null;
-    try { body = JSON.parse(buf.toString('utf8') || '{}'); } catch { /* bad body */ }
-    if (!body || typeof body !== 'object') { fail(res, E.error('BAD_PROTOCOL', n.id, 'heartbeat body must be JSON')); return; }
-    cluster.onHeartbeat(n, body);
-    send(res, 200, n.heartbeatAnswer(body, receivedTs));
+  if (what === 'deliver') {
+    if (n.status === 'down' || n.status === 'restarting') { req.socket.destroy(); return; }
+    // Messages held by slow chaos are in flight at this node too, so they count towards PEER_OVERLOADED.
+    if (n.inflight >= INFLIGHT_LIMIT) {
+      const { buf } = await readRaw(req);
+      let correlationId = null;
+      try { const id = JSON.parse(buf.toString('utf8')).messageId; if (typeof id === 'string') correlationId = id; } catch { /* not JSON */ }
+      send(res, 503, { error: E.error('PEER_OVERLOADED', n.id, `${n.inflight} messages in flight`), correlationId });
+      return;
+    }
+    n.inflight += 1;
+    try { await receiveDeliver(n, req, res); } finally { n.inflight -= 1; }
     return;
   }
+  if (!(await receiveChaos(n, req, res))) return;
+  const receivedTs = n.now();
+  let body = null;
+  try { body = JSON.parse((await readRaw(req)).buf.toString('utf8') || '{}'); } catch { /* bad body */ }
+  if (!body || typeof body !== 'object') { fail(res, E.error('BAD_PROTOCOL', n.id, 'heartbeat body must be JSON')); return; }
+  cluster.onHeartbeat(n, body);
+  send(res, 200, n.heartbeatAnswer(body, receivedTs));
+}
+
+async function receiveDeliver(n, req, res) {
+  if (!(await receiveChaos(n, req, res))) return;
+  const { buf, size } = await readRaw(req);
   if (size > E.MAX_BYTES) { fail(res, E.error('MESSAGE_TOO_LARGE', n.id, `envelope is ${size} bytes, max ${E.MAX_BYTES}`)); return; }
   let env;
   try { env = JSON.parse(buf.toString('utf8')); } catch { fail(res, E.error('BAD_PROTOCOL', n.id, 'envelope is not JSON')); return; }

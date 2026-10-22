@@ -89,9 +89,9 @@ itself) is not a protocol error. `at` says who produced the error (`node`, `gate
 | `NO_LISTENER` | 404 | The application exists but has no listener with that `listenerId`. |
 | `TIMEOUT` | 504 | No answer within `ttlMs`. Also what the sender sees when a message is dropped. |
 | `NODE_UNAVAILABLE` | 503 | The node (or, with `at: "gateway"`, the gateway) is known but down. |
-| `PEER_OVERLOADED` | 503 | The destination has too many messages in flight (default limit 50 per node). |
+| `PEER_OVERLOADED` | 503 | The destination has too many messages in flight (default limit 50 per node). A message counts as in flight from the moment it reaches the node until it is answered, including time held by `slow` chaos. |
 | `MESSAGE_TOO_LARGE` | 413 | The envelope is larger than 65536 bytes. |
-| `REJECTED` | 401 / 429 | `reason: "auth"` (401) or `reason: "rate_limit"` (429). |
+| `REJECTED` | 401 / 429 | `reason: "auth"` (401) or `reason: "rate_limit"` (429). Only the gateway produces it; a `rate_limit` rejection is passed to the sender unchanged (`at: "gateway"`) and is not retried. |
 | `BAD_PROTOCOL` | 400 | Wrong `proto`, unsupported `version`, or an invalid envelope. |
 | `MODE_SWITCH_FAILED` | 502 | Only from `POST /api/mode`, see section 4. |
 | `MIN_NODES` | 409 | Only from `DELETE /api/nodes/<id>`: the cluster cannot go below 3 nodes. |
@@ -242,7 +242,9 @@ Switching back to mesh deregisters every node from the gateway, then rebuilds th
 ```
 
 - `kill`: the node stops answering and stops sending heartbeats, with no announcement. It stays in the list as `down`.
-- `restart`: a graceful restart. The node announces `restarting`, is down for `downMs`, then comes back.
+- `restart`: a graceful restart. The node announces `restarting`, is down for `downMs`, then comes back. Its status
+  is `restarting` from the moment the chaos call answers (the answer already shows it), and it answers nothing until it
+  is back.
 - `slow` and `drop` apply to everything the node receives, heartbeats included, so they can cause false failure
   detection. That is on purpose. A dropped message gives the sender `TIMEOUT`.
 - `skew` shifts the node's clock, to show links going `out` of clock sync.
@@ -288,6 +290,37 @@ Switching back to mesh deregisters every node from the gateway, then rebuilds th
   the `kill` until the gateway reports the node as down: an event with `kind` `node-down` and `to` = the nodeId on
   `GET /t/pisak/api/events?since=N`. Before a switch to gateway mode the node module calls
   `POST /t/pisak/api/admin {"action": "reset"}`. Planned leaves and restarts are not counted.
+
+#### Node internals (additive, v0.2 compatible)
+
+Extra fields; nothing above is renamed or removed. All counters start at 0 on `POST /api/reset` and for new nodes.
+
+```json
+"nodes": [{"nodeId": "n1", "...": "fields above",
+  "limits": {"inflight": 50}, "queued": 0, "pending": 1,
+  "dedup": {"size": 42, "hits": 2},
+  "gateway": {"registered": false, "lastProbeAgeMs": null},
+  "counters": {"sent":     {"request": 12, "response": 9, "oneway": 3, "broadcast": 1},
+               "received": {"request": 9, "response": 11, "oneway": 2, "broadcast": 0},
+               "failures": {"NO_LISTENER": 1}}}],
+"links": [{"from": "n1", "to": "n2", "...": "fields above", "misses": 0, "heartbeatAgeMs": 420}],
+"summary": {"linksByState": {"reachable": 20}, "clockSync": {"in": 20, "out": 0}, "maxAbsOffsetMs": 3,
+            "messagingDisabled": 0, "inflight": 2, "pending": 1, "queued": 0, "failures": {"NO_LISTENER": 1}}
+```
+
+- `limits.inflight`: above this many messages in flight at the node, `deliver` answers `PEER_OVERLOADED`.
+- `queued`: sends waiting for the node's messaging to be enabled. `pending`: requests this node sent that have no
+  outcome yet.
+- `dedup.size`: message ids in the duplicate cache; `dedup.hits`: duplicates caught since reset.
+- `gateway.registered`: the node holds a gateway token. `gateway.lastProbeAgeMs`: ms since the gateway's last probe,
+  `null` when the node does not route via the gateway.
+- `counters.sent`: messages the node put on the wire (counted after messaging was enabled; `response` = answers it
+  produced). `counters.received`: messages accepted for this node (duplicates not counted; `response` = answers to its
+  own requests). `counters.failures`: error codes of section 2 for sends from this node, one per failed send, or one
+  per failed destination of a broadcast.
+- Link `misses`: consecutive missed heartbeats; `heartbeatAgeMs`: ms since the last answered heartbeat, `null` if
+  never. Gateway links have `misses: null` and `heartbeatAgeMs` from the last gateway contact.
+- `summary`: the same, summed over all nodes and links. `maxAbsOffsetMs` is `null` when no link has an offset.
 
 ### `GET /t/farzad/api/events?since=<seq>`
 

@@ -156,7 +156,8 @@ case "$cmd" in
       gh pr checkout "$nr" -R "$REPO" >/dev/null 2>&1 || true
       # Hard time limit and output to a file: a test server that survives a failed test otherwise keeps the pipe open forever.
       ut=$(mktemp); rc=0; (cd board && perl -e 'alarm 90; exec @ARGV' node test.mjs > "$ut" 2>&1) || rc=$?
-      pkill -f "board/server.js" 2>/dev/null || true
+      # Only this clone's test server: rounds for other groups may be testing at the same time.
+      pkill -f "$(pwd)/board/server.js" 2>/dev/null || true
       tail -1 "$ut"; [ $rc -eq 0 ] || { echo "  TESTS FAILED or hung (exit $rc):"; grep -E "✗|Error|error" "$ut" | head -5; bad=1; }
       git checkout -q main
     fi
@@ -188,19 +189,19 @@ case "$cmd" in
       git checkout -q main 2>/dev/null; git pull -q --ff-only origin main 2>/dev/null || true
       titel=$(gh pr view "$nr" -R "$REPO" --json title -q .title | cut -c1-70)
       ta_pr "$nr" || continue        # someone else already took this PR
-      rc=0; tools/release.sh check "$nr" > "${TMPDIR:-/tmp}/chk-$nr.txt" 2>&1 || rc=$?; git checkout -q main 2>/dev/null || true
+      rc=0; tools/release.sh check "$nr" > "${TMPDIR:-/tmp}/chk-${REPO#*/}-$nr.txt" 2>&1 || rc=$?; git checkout -q main 2>/dev/null || true
       # The "waiting for the lead" pile must survive the round, otherwise a PR once set aside drops out of
       # sight and nobody sees it again. The label sits on the PR, not in this script.
       if [ $rc -eq 2 ]; then markera "$nr"; slapp_pr "$nr"; vantar+=("#$nr $titel — shared files, read the diff yourself"); continue; fi
-      if [ $rc -ne 0 ]; then slapp_pr "$nr"; stoppade+=("#$nr $titel — $( (grep -E "OTHER TEAM|SECRET|FAILED" "${TMPDIR:-/tmp}/chk-$nr.txt" || true) | head -2 | tr '\n' ' ')"); continue; fi
+      if [ $rc -ne 0 ]; then slapp_pr "$nr"; stoppade+=("#$nr $titel — $( (grep -E "OTHER TEAM|SECRET|FAILED" "${TMPDIR:-/tmp}/chk-${REPO#*/}-$nr.txt" || true) | head -2 | tr '\n' ' ')"); continue; fi
       traff=$(gh pr diff "$nr" -R "$REPO" | awk '/^diff --git a\/board\//{p=1} /^diff --git a\/projects\//{p=0} p' | grep -E '^\+' | grep -nE "$RISK" | cut -c1-140 | head -3 || true)
       if [ -n "$traff" ]; then markera "$nr"; slapp_pr "$nr"; vantar+=("#$nr $titel — risk pattern, read it yourself: $traff"); continue; fi
-      if ! gh pr merge "$nr" -R "$REPO" --squash > "${TMPDIR:-/tmp}/m-$nr.txt" 2>&1; then
-        if grep -qi conflict "${TMPDIR:-/tmp}/m-$nr.txt"; then
+      if ! gh pr merge "$nr" -R "$REPO" --squash > "${TMPDIR:-/tmp}/m-${REPO#*/}-$nr.txt" 2>&1; then
+        if grep -qi conflict "${TMPDIR:-/tmp}/m-${REPO#*/}-$nr.txt"; then
           gh pr checkout "$nr" -R "$REPO" >/dev/null 2>&1 && git fetch -q origin main && git merge -q -X ours --no-edit origin/main >/dev/null 2>&1 && git push -q 2>/dev/null
           git checkout -q main; sleep 5
-          gh pr merge "$nr" -R "$REPO" --squash > "${TMPDIR:-/tmp}/m-$nr.txt" 2>&1 || { slapp_pr "$nr"; stoppade+=("#$nr $titel — conflict that could not be synced"); continue; }
-        else slapp_pr "$nr"; stoppade+=("#$nr $titel — $(tail -1 "${TMPDIR:-/tmp}/m-$nr.txt" | cut -c1-100)"); continue; fi
+          gh pr merge "$nr" -R "$REPO" --squash > "${TMPDIR:-/tmp}/m-${REPO#*/}-$nr.txt" 2>&1 || { slapp_pr "$nr"; stoppade+=("#$nr $titel — conflict that could not be synced"); continue; }
+        else slapp_pr "$nr"; stoppade+=("#$nr $titel — $(tail -1 "${TMPDIR:-/tmp}/m-${REPO#*/}-$nr.txt" | cut -c1-100)"); continue; fi
       fi
       gh pr edit "$nr" -R "$REPO" --remove-label "$ETIKETT" >/dev/null 2>&1 || true
       gh pr edit "$nr" -R "$REPO" --remove-label vantar-pa-ledaren >/dev/null 2>&1 || true

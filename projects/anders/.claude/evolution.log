@@ -6,3 +6,4 @@
 2026-10-22 10:40 SPAWN: pr-delivery (delivery broke twice: push auth, then PR #5 stopped by the release round)
 2026-10-22 10:40 DISSOLVE: example-capability (_template.md, a template, never a real capability)
 2026-10-22 10:46 MUTATE: capabilities wrapped as agents in .claude/agents (spore smsf-9: capability files alone are not callable agents); removed model: sonnet from hive.md (spore frontend2-1)
+2026-10-22 10:59 MUTATE: energy update after live check: contract-integration 70 (verified live farzad/pisak, no mismatches), metrics-comparison and topology-visualization 45, pr-delivery 35 (idle since PR #5 merged); no merge/dissolve needed, no overlaps or gaps

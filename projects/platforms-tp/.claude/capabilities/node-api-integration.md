@@ -30,6 +30,8 @@ For plugin-to-plugin requests, use `fetch` with `http://127.0.0.1:${PORT}`, the 
 
 Keep proxied paths fixed to contract-approved endpoints. Never forward a caller-supplied path; if configurable paths are introduced, reject encoded or dot segments and verify URL normalization preserves the exact path (from spore platforms-6, team pisak).
 
+Keep proxied paths fixed to contract-approved endpoints. Never forward a caller-supplied path; if configurable paths are introduced, reject encoded or dot segments and verify URL normalization preserves the exact path (from spore platforms-6, team pisak).
+
 ## Self-Modification Protocol
 
 If integration work repeatedly expands into scenario sequencing, suggest merging with control-orchestrator. If transport and contract normalization become distinct recurring concerns, suggest splitting this capability.
