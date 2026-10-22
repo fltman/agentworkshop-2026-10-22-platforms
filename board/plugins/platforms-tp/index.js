@@ -26,13 +26,14 @@ const defaultState = () => ({
     rate: 120,
     payloadBytes: 256,
     dropRate: 0,
-    mix: { request: 60, response: 20, oneWay: 13, broadcast: 7 },
+    mix: { request: 60, oneway: 33, broadcast: 7 },
   },
   chaos: {
     nodeKilled: null,
     slowNode: null,
     slowNodeMs: 0,
     dropRate: 0,
+    dropNodeId: null,
   },
   gateway: {
     healthy: true,
@@ -57,6 +58,8 @@ const defaultState = () => ({
     step: 'ready',
     runId: null,
     results: { mesh: null, gateway: null },
+    baseline: null,
+    detection: { mesh: null, gateway: null },
     eventCursors: {},
   },
   events: [],
@@ -108,6 +111,7 @@ function readState(dataDir) {
       ...defaultState().scenario,
       ...(saved.scenario || {}),
       results: { ...defaultState().scenario.results, ...(saved.scenario?.results || {}) },
+      detection: { ...defaultState().scenario.detection, ...(saved.scenario?.detection || {}) },
       eventCursors: { ...(saved.scenario?.eventCursors || {}) },
     },
     events: pruneEvents(saved.events),
@@ -223,13 +227,14 @@ function syncNodeState(state, nodeState) {
   state.chaos.slowNode = slowedNode?.nodeId ?? null;
   state.chaos.slowNodeMs = Number(slowedNode?.chaos?.delayMs) || 0;
   state.chaos.dropRate = Number(droppedNode?.chaos?.dropPercent) || 0;
+  state.chaos.dropNodeId = droppedNode?.nodeId ?? null;
   state.metrics = {
     throughput: Math.round(Number(metrics?.throughputPerSec) || 0),
     latencyP50: Number(metrics?.p50Ms) || 0,
     latencyP95: Number(metrics?.p95Ms) || 0,
     errorRate: Number(metrics?.errorRate) || 0,
     openConnections: Number(nodeState.openConnections) || 0,
-    failedNodeDetectionMs: Number(metrics?.detectMs) || 0,
+    failedNodeDetectionMs: metrics?.detectMs ?? null,
   };
   state.source = 'live';
   state.liveError = null;
@@ -242,11 +247,12 @@ function syncNodeState(state, nodeState) {
         latencyP50: Number(lastRun.p50 ?? lastRun.p50Ms) || 0,
         latencyP95: Number(lastRun.p95 ?? lastRun.p95Ms) || 0,
         errorRate: Number(lastRun.errorRate) || 0,
-        failedNodeDetectionMs: Number(lastRun.detectMs ?? lastRun.detectMsAvg ?? lastRun.failedNodeDetectionMs) || 0,
+        failedNodeDetectionMs: lastRun.detectMsAvg ?? lastRun.detectMs ?? lastRun.failedNodeDetectionMs ?? null,
         openConnections: Number(lastRun.openConnections) || 0,
         nodeCount: Number(lastRun.nodeCount ?? lastRun.nodes) || 0,
-        durationMs: Number(lastRun.duration) || 0,
-        capturedAt: new Date().toISOString(),
+        durationMs: Number(lastRun.durationMs ?? lastRun.duration) || 0,
+        endedAt: lastRun.endedTs ?? null,
+        capturedAt: state.scenario.results[modeName]?.capturedAt || new Date().toISOString(),
       };
     }
   }
@@ -335,6 +341,22 @@ async function collectNodeEvents(since) {
   return { seq: Number(page.seq) || since, events };
 }
 
+async function waitForNodeDown(dataDir, runId, nodeId, since) {
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (!scenarioIsCurrent(dataDir, runId)) throw new Error('Demo run was cancelled.');
+    const collected = await collectNodeEvents(since);
+    const event = collected.events.find(item => (
+      ['node.down', 'node-down'].includes(item.type ?? item.kind)
+      && (item.to ?? item.nodeId) === nodeId
+    ));
+    if (event) return event;
+    if (collected.seq > since) since = collected.seq;
+    await wait(250);
+  }
+  throw new GatewayAdminError(`Timed out waiting for ${nodeId} to be reported down.`, 504);
+}
+
 function metricSnapshot(state) {
   return {
     throughput: state.metrics.throughput,
@@ -360,11 +382,35 @@ function applyLiveSnapshot(target, liveState) {
   target.scenario.results = { ...target.scenario.results, ...liveState.scenario.results };
 }
 
+async function setDropChaos(state, dropRate) {
+  const nodeState = await loopbackApi(NODE_API.state);
+  const currentTarget = state.chaos.dropNodeId
+    || nodeState.nodes?.find(node => Number(node.chaos?.dropPercent) > 0)?.nodeId;
+  const target = dropRate > 0
+    ? currentTarget || nodeState.nodes?.find(node => (
+      node.status === 'up'
+      && Number(node.chaos?.dropPercent) === 0
+      && Number(node.chaos?.delayMs) === 0
+      && node.nodeId !== state.chaos.nodeKilled
+    ))?.nodeId
+    : currentTarget;
+  if (dropRate > 0 && !target) throw new GatewayAdminError('No healthy node is available for message-drop chaos.', 409, state);
+  if (!target) {
+    state.chaos.dropRate = 0;
+    state.chaos.dropNodeId = null;
+    return;
+  }
+
+  await loopbackApi(NODE_API.chaos, 'POST', { action: 'drop', nodeId: target, percent: dropRate });
+  state.chaos.dropRate = dropRate;
+  state.chaos.dropNodeId = dropRate > 0 ? target : null;
+}
+
 async function runDemoStep(dataDir, runId, step, operation) {
   if (!scenarioIsCurrent(dataDir, runId)) return;
   await updateScenario(dataDir, runId, state => { state.scenario.step = step; });
   const from = await latestNodeEventSeq();
-  await operation();
+  await operation(from);
   const collected = await collectNodeEvents(from);
   await updateScenario(dataDir, runId, state => {
     state.scenario.eventCursors[step] = { from, to: collected.seq };
@@ -386,7 +432,6 @@ async function runLiveDemo(dataDir, runId) {
     await gatewayAdmin('revive');
     await gatewayAdmin('reset');
     await loopbackApi(NODE_API.reset, 'POST', { nodes: 5, mode: 'mesh' });
-    await loopbackApi(NODE_API.nodes, 'POST', { count: 10, external: false });
     await loopbackApi(NODE_API.traffic, 'POST', {
       rate: 120,
       mix: { request: 60, oneway: 13, broadcast: 7 },
@@ -399,24 +444,40 @@ async function runLiveDemo(dataDir, runId) {
     });
   });
 
-  await runDemoStep(dataDir, runId, 'Measuring mesh traffic', async () => {
+  await runDemoStep(dataDir, runId, 'Measuring five-node mesh baseline', async () => {
     await wait(10000);
     ensureCurrent();
     const state = await syncLiveState(readState(dataDir));
     await updateScenario(dataDir, runId, current => {
       applyLiveSnapshot(current, state);
-      current.scenario.results.mesh = metricSnapshot(current);
+      current.scenario.baseline = { ...metricSnapshot(current), nodeCount: 5 };
     });
   });
 
-  await runDemoStep(dataDir, runId, 'Detecting mesh node failure', async () => {
+  await runDemoStep(dataDir, runId, 'Scaling mesh to fifteen nodes', async () => {
     ensureCurrent();
+    await loopbackApi(NODE_API.nodes, 'POST', { count: 10, external: false });
+    const state = await syncLiveState(readState(dataDir));
+    await updateScenario(dataDir, runId, current => applyLiveSnapshot(current, state));
+  });
+
+  await runDemoStep(dataDir, runId, 'Measuring fifteen-node mesh traffic', async () => {
+    await wait(10000);
+    ensureCurrent();
+    const state = await syncLiveState(readState(dataDir));
+    await updateScenario(dataDir, runId, current => applyLiveSnapshot(current, state));
+  });
+
+  await runDemoStep(dataDir, runId, 'Detecting mesh node failure', async from => {
+    ensureCurrent();
+    const killedAt = Date.now();
     await loopbackApi(NODE_API.chaos, 'POST', { action: 'kill', nodeId: 'n2' });
-    await wait(3500);
+    await waitForNodeDown(dataDir, runId, 'n2', from);
+    const detectedMs = Math.max(0, Date.now() - killedAt);
     const state = await syncLiveState(readState(dataDir));
     await updateScenario(dataDir, runId, current => {
       applyLiveSnapshot(current, state);
-      current.scenario.results.mesh = metricSnapshot(current);
+      current.scenario.detection.mesh = detectedMs;
     });
   });
 
@@ -428,7 +489,19 @@ async function runLiveDemo(dataDir, runId) {
     await updateScenario(dataDir, runId, current => applyLiveSnapshot(current, state));
   });
 
-  await runDemoStep(dataDir, runId, 'Measuring gateway traffic', async () => {
+  await runDemoStep(dataDir, runId, 'Restoring the node and configuring gateway traffic', async () => {
+    ensureCurrent();
+    await loopbackApi(NODE_API.chaos, 'POST', { action: 'revive', nodeId: 'n2' });
+    await loopbackApi(NODE_API.traffic, 'POST', {
+      rate: 120,
+      mix: { request: 60, oneway: 13, broadcast: 7 },
+      payloadBytes: 256,
+    });
+    const state = await syncLiveState(readState(dataDir));
+    await updateScenario(dataDir, runId, current => applyLiveSnapshot(current, state));
+  });
+
+  await runDemoStep(dataDir, runId, 'Measuring fifteen-node gateway traffic', async () => {
     await wait(10000);
     ensureCurrent();
     const state = await syncLiveState(readState(dataDir));
@@ -441,14 +514,29 @@ async function runLiveDemo(dataDir, runId) {
         rateLimited: Number(metrics.rateLimited) || 0,
         p50Ms: Number(metrics.p50Ms) || 0,
         p95Ms: Number(metrics.p95Ms) || 0,
-        detectMs: Number(metrics.detectMs) || 0,
+        detectMs: metrics.detectMs ?? null,
       };
     } catch {
       // The NodeLink mode metrics remain authoritative when optional gateway metrics are unavailable.
     }
     await updateScenario(dataDir, runId, current => {
       applyLiveSnapshot(current, state);
-      current.scenario.results.gateway = { ...metricSnapshot(current), gatewayMetrics };
+      if (current.scenario.results.gateway) {
+        current.scenario.results.gateway.gatewayMetrics = gatewayMetrics;
+      }
+    });
+  });
+
+  await runDemoStep(dataDir, runId, 'Detecting gateway-mode node failure', async from => {
+    ensureCurrent();
+    const killedAt = Date.now();
+    await loopbackApi(NODE_API.chaos, 'POST', { action: 'kill', nodeId: 'n2' });
+    await waitForNodeDown(dataDir, runId, 'n2', from);
+    const detectedMs = Math.max(0, Date.now() - killedAt);
+    const state = await syncLiveState(readState(dataDir));
+    await updateScenario(dataDir, runId, current => {
+      applyLiveSnapshot(current, state);
+      current.scenario.detection.gateway = detectedMs;
     });
   });
 
@@ -482,15 +570,33 @@ async function runLiveDemo(dataDir, runId) {
       await updateScenario(dataDir, runId, state => syncGatewayHealth(state, disabled));
     } else {
       await updateScenario(dataDir, runId, state => {
-        state.scenario.step = 'HA stretch unavailable; returning to mesh';
+        state.scenario.step = 'HA stretch unavailable';
         state.gateway.ha = null;
         state.gateway.haEnabled = false;
       });
     }
-    await loopbackApi(NODE_API.mode, 'POST', { mode: 'mesh' });
     await loopbackApi(NODE_API.traffic, 'POST', { rate: 0 });
     const state = await syncLiveState(readState(dataDir));
-    await updateScenario(dataDir, runId, current => applyLiveSnapshot(current, state));
+    let gatewayMetrics = null;
+    try {
+      const metrics = await loopbackApi(GATEWAY_API.metrics);
+      gatewayMetrics = {
+        routed: Number(metrics.routed) || 0,
+        retries: Number(metrics.retries) || 0,
+        rateLimited: Number(metrics.rateLimited) || 0,
+        p50Ms: Number(metrics.p50Ms) || 0,
+        p95Ms: Number(metrics.p95Ms) || 0,
+        detectMs: metrics.detectMs ?? null,
+      };
+    } catch {
+      // The NodeLink mode metrics remain authoritative when optional gateway metrics are unavailable.
+    }
+    await updateScenario(dataDir, runId, current => {
+      applyLiveSnapshot(current, state);
+      if (current.scenario.results.gateway) {
+        current.scenario.results.gateway.gatewayMetrics = gatewayMetrics;
+      }
+    });
   });
 
   await updateScenario(dataDir, runId, state => {
@@ -551,14 +657,10 @@ async function applyAction(state, dataDir, action, payload={}) {
       const dropRate = clamp(Number(payload.dropRate ?? state.chaos.dropRate ?? state.traffic.dropRate ?? 0), 0, 100);
       await loopbackApi(NODE_API.traffic, 'POST', {
         rate,
-        mix: { request: 60, oneway: 13, broadcast: 7 },
+        mix: { request: 60, oneway: 33, broadcast: 7 },
         payloadBytes,
       });
-      await loopbackApi(NODE_API.chaos, 'POST', {
-        action: dropRate > 0 ? 'drop' : 'clear',
-        nodeId: 'n2',
-        ...(dropRate > 0 ? { percent: dropRate } : {}),
-      });
+      if (payload.dropRate !== undefined) await setDropChaos(state, dropRate);
       state.traffic.rate = rate;
       state.traffic.payloadBytes = payloadBytes;
       state.chaos.dropRate = dropRate;
@@ -573,6 +675,9 @@ async function applyAction(state, dataDir, action, payload={}) {
       state.scenario.name = payload.name || 'live-demo';
       state.scenario.runId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       state.scenario.results = { mesh: null, gateway: null };
+      state.scenario.baseline = null;
+      state.scenario.detection = { mesh: null, gateway: null };
+      state.scenario.eventCursors = {};
       state.scenario.step = 'Starting live scenario';
       recordEvent(state, dataDir, 'scenario', `Scenario started: ${state.scenario.name}`);
       const runId = state.scenario.runId;
@@ -603,12 +708,7 @@ async function applyAction(state, dataDir, action, payload={}) {
     }
     case 'drop-messages': {
       const dropRate = clamp(Number(payload.dropRate ?? state.chaos.dropRate ?? 0), 0, 100);
-      await loopbackApi(NODE_API.chaos, 'POST', {
-        action: dropRate > 0 ? 'drop' : 'clear',
-        nodeId: 'n2',
-        ...(dropRate > 0 ? { percent: dropRate } : {}),
-      });
-      state.chaos.dropRate = dropRate;
+      await setDropChaos(state, dropRate);
       syncNodeState(state, await loopbackApi(NODE_API.state));
       state.scenario.step = dropRate > 0 ? 'message loss injected' : 'steady';
       recordEvent(state, dataDir, 'fault', `Drop rate set to ${dropRate}%`);

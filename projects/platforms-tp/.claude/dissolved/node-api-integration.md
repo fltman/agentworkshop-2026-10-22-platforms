@@ -11,6 +11,8 @@ can-merge-with: [control-orchestrator]
 
 # Node API Integration Capability
 
+This capability was split on 2026-10-22 into `node-api-contracts` and `scenario-orchestration` because API integration and demo sequencing have become distinct, repeatedly exercised concerns.
+
 ## What This Enables
 
 Connects the platforms-tp control plane to the Node and Gateway APIs and sequences live mesh/gateway demos. Keeps scenario controls, runtime state, comparison snapshots, and dashboard-facing metrics aligned with the teams' published contracts.
@@ -36,6 +38,8 @@ Keep proxied paths fixed to contract-approved endpoints. Never forward a caller-
 For A/B mode comparisons, retain a frozen per-mode run result alongside rolling live metrics; the rolling window empties after a mode switch (from spore platforms-12, team farzad).
 
 After HA promotion, verify service recovery and allow the new active to establish fresh liveness before treating nodes as failed; only the intentionally killed demo node may remain down (from spore platforms-14, team pisak).
+
+In gateway mode, do not infer peer health from node-to-gateway links; use Farzad's additive per-peer views marked `via: gateway`, and preserve `unknown` when a probe has no peer status (from spore platforms-16, team farzad).
 
 ## Self-Modification Protocol
 

@@ -10,16 +10,22 @@ const els = {
   haStatus: document.getElementById('haStatus'),
   chaosStatus: document.getElementById('chaosStatus'),
   scenarioStep: document.getElementById('scenarioStep'),
+  meshBaseline: document.getElementById('meshBaseline'),
   metricSource: document.getElementById('metricSource'),
   controlError: document.getElementById('controlError'),
   meshThroughput: document.getElementById('meshThroughput'),
   meshP95: document.getElementById('meshP95'),
   meshErrors: document.getElementById('meshErrors'),
   meshConnections: document.getElementById('meshConnections'),
+  meshDuration: document.getElementById('meshDuration'),
+  meshDetection: document.getElementById('meshDetection'),
   gatewayThroughput: document.getElementById('gatewayThroughput'),
   gatewayP95: document.getElementById('gatewayP95'),
   gatewayErrors: document.getElementById('gatewayErrors'),
   gatewayConnections: document.getElementById('gatewayConnections'),
+  gatewayDuration: document.getElementById('gatewayDuration'),
+  gatewayDetection: document.getElementById('gatewayDetection'),
+  gatewayHopMetrics: document.getElementById('gatewayHopMetrics'),
   rate: document.getElementById('rate'),
   payload: document.getElementById('payload'),
   dropRate: document.getElementById('dropRate'),
@@ -54,6 +60,10 @@ function renderState(state) {
     : 'not available';
   els.chaosStatus.textContent = state.chaos.dropRate > 0 || state.chaos.nodeKilled !== null ? 'fault injected' : 'steady';
   els.scenarioStep.textContent = state.scenario.step;
+  const baseline = state.scenario.baseline;
+  els.meshBaseline.textContent = baseline
+    ? `${baseline.nodeCount} nodes • ${displayMetric(baseline.throughput, ' msg/s')} • p95 ${displayMetric(baseline.latencyP95, ' ms')}`
+    : '—';
   els.rate.value = state.traffic.rate;
   els.payload.value = state.traffic.payloadBytes;
   els.dropRate.value = state.chaos.dropRate;
@@ -71,7 +81,16 @@ function renderState(state) {
     els[`${prefix}P95`].textContent = displayMetric(result?.latencyP95, ' ms');
     els[`${prefix}Errors`].textContent = displayMetric(result?.errorRate);
     els[`${prefix}Connections`].textContent = displayMetric(result?.openConnections);
+    els[`${prefix}Duration`].textContent = displayMetric(
+      result?.durationMs == null ? null : (result.durationMs / 1000).toFixed(1),
+      ' s',
+    );
+    els[`${prefix}Detection`].textContent = displayMetric(state.scenario.detection?.[mode], ' ms');
   }
+  const hop = results.gateway?.gatewayMetrics;
+  els.gatewayHopMetrics.textContent = hop
+    ? `Pisak gateway hop • p95 ${displayMetric(hop.p95Ms, ' ms')} • routed ${displayMetric(hop.routed)} • retries ${displayMetric(hop.retries)} • limited ${displayMetric(hop.rateLimited)}`
+    : 'Pisak gateway-hop metrics are optional.';
 
   if (Array.isArray(state.events)) {
     els.events.innerHTML = '';

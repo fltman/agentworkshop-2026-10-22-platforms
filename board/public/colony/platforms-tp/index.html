@@ -83,15 +83,17 @@
         <div class="status-row"><span>Gateway HA</span><strong id="haStatus">not available</strong></div>
         <div class="status-row"><span>Chaos</span><strong id="chaosStatus">steady</strong></div>
         <div class="status-row"><span>Scenario</span><strong id="scenarioStep">ready</strong></div>
+        <div class="status-row"><span>Five-node mesh baseline</span><strong id="meshBaseline">—</strong></div>
       </section>
 
       <section class="panel">
-        <h2>Live comparison</h2>
+        <h2>Frozen mesh vs gateway comparison</h2>
         <div class="comparison-grid">
-          <strong>Mode</strong><strong>Throughput</strong><strong>p95</strong><strong>Errors</strong><strong>Links</strong>
-          <span>Mesh</span><span id="meshThroughput">—</span><span id="meshP95">—</span><span id="meshErrors">—</span><span id="meshConnections">—</span>
-          <span>Gateway</span><span id="gatewayThroughput">—</span><span id="gatewayP95">—</span><span id="gatewayErrors">—</span><span id="gatewayConnections">—</span>
+          <strong>Mode</strong><strong>Throughput</strong><strong>p95</strong><strong>Errors</strong><strong>Connections</strong><strong>Duration</strong><strong>Detection</strong>
+          <span>Mesh</span><span id="meshThroughput">—</span><span id="meshP95">—</span><span id="meshErrors">—</span><span id="meshConnections">—</span><span id="meshDuration">—</span><span id="meshDetection">—</span>
+          <span>Gateway</span><span id="gatewayThroughput">—</span><span id="gatewayP95">—</span><span id="gatewayErrors">—</span><span id="gatewayConnections">—</span><span id="gatewayDuration">—</span><span id="gatewayDetection">—</span>
         </div>
+        <p id="gatewayHopMetrics" class="source-note">Pisak gateway-hop metrics are optional.</p>
       </section>
 
       <section class="panel event-panel">

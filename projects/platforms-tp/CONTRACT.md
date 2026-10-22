@@ -17,8 +17,11 @@ Returns the current scenario state as JSON.
 
 The state includes `source` (`live` or `simulation`) and `liveError`. When Farzad is available, displayed metrics and
 node count are read from its live `/api/state`; local simulated metrics are used only as a fallback and the tile
-labels that fallback. `scenario.results.mesh` and `.gateway` retain the captured comparison values, and
-`scenario.eventCursors` records the Farzad event sequence range collected for each demo step.
+labels that fallback. `scenario.results.mesh` and `.gateway` retain Farzad's whole-run `metrics.lastRun` values,
+including `durationMs`, `openConnections`, and a stable `capturedAt`; missing detection metrics remain `null`.
+The separate `scenario.detection` values are measured from each node-kill request until Farzad reports that node
+down. `scenario.baseline` records the five-node mesh stage before scaling, and `scenario.eventCursors` records the
+Farzad event sequence range collected for each demo step.
 
 Example response:
 
@@ -32,7 +35,7 @@ Example response:
   "traffic": {
     "rate": 120,
     "payloadBytes": 256,
-    "mix": { "request": 60, "response": 20, "oneWay": 13, "broadcast": 7 }
+    "mix": { "request": 60, "oneway": 33, "broadcast": 7 }
   },
   "gateway": {
     "healthy": true,
@@ -60,6 +63,8 @@ Example response:
     "step": "ready",
     "runId": null,
     "results": { "mesh": null, "gateway": null },
+    "baseline": null,
+    "detection": { "mesh": null, "gateway": null },
     "eventCursors": {}
   }
 }
@@ -81,12 +86,15 @@ Supported actions:
 - `reset` — restore default values
 
 `start-scenario` returns immediately with `running: true`; poll `/api/state` for step progress and completion. It
-resets the gateway and NodeLink to five mesh nodes, scales to fifteen, runs live traffic and node-failure detection,
-then runs the same node/traffic setup in gateway mode and captures both NodeLink metrics and optional Pisak gateway
-metrics. It checks single-gateway failure/recovery; when Pisak exposes its additive HA state, the runner also enables
-HA, kills the active instance, verifies failover, restores the standby, and disables HA. Older gateway versions skip
-only this optional HA stretch. The runner then returns to mesh with traffic stopped. The two mode results are
-retained for side-by-side comparison. Other controls return `409` while the demo is running. A failed live step
+resets the gateway and NodeLink to five mesh nodes, measures a five-node traffic baseline, scales to fifteen, and
+measures traffic and node-failure detection in mesh mode. It then switches to gateway mode, restores the failed node,
+and repeats the same traffic and node-failure steps. The mode comparison uses Farzad's `metrics.lastRun.mesh` and
+`.gateway` fields; event timing reports kill-to-node-down detection separately. Optional Pisak metrics are only
+shown as gateway-hop/HA diagnostics. When Pisak exposes its additive HA state, the runner also checks
+single-gateway failure/recovery, enables HA, kills the active instance, verifies failover, restores the standby, and
+disables HA. Older gateway versions skip only this optional HA stretch. The runner stops traffic and leaves the
+system in gateway mode, avoiding a new mesh run that would replace the frozen mesh comparison. Other controls return
+`409` while the demo is running. A failed live step
 pauses the demo, attempts to stop traffic and restore gateway availability, reports the error in
 `scenario.step`/`liveError`, and unlocks controls.
 
@@ -110,6 +118,9 @@ Example request:
   "dropRate": 5
 }
 ```
+
+Traffic mixes use `request`, `oneway`, and `broadcast` send types. Setting traffic does not change chaos state.
+Message-drop chaos targets a healthy node and changes only its drop percentage, without clearing other node faults.
 
 ## Event stream
 

@@ -152,12 +152,12 @@ input[type="range"] {
 .status-row strong { color: var(--text); }
 .comparison-grid {
   display: grid;
-  grid-template-columns: 1.2fr repeat(4, 1fr);
+  grid-template-columns: 1.2fr repeat(6, 1fr);
   gap: 10px;
   align-items: center;
   overflow-x: auto;
 }
-.comparison-grid > :nth-child(-n+5) {
+.comparison-grid > :nth-child(-n+7) {
   color: var(--muted);
   font-size: 0.78rem;
   text-transform: uppercase;
@@ -177,7 +177,7 @@ button:disabled, input:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 @media (max-width: 700px) {
   .summary-grid, .field-grid { grid-template-columns: 1fr 1fr; }
-  .comparison-grid { min-width: 540px; }
+  .comparison-grid { min-width: 800px; }
 }
 @media (max-width: 470px) {
   .summary-grid, .field-grid { grid-template-columns: 1fr; }
