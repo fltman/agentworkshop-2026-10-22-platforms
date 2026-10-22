@@ -30,7 +30,7 @@
 //   POST /api/messages           {from, channel, text, reply_to}  (JSON eller form-urlencoded). Huvudkanalen heter
 //                                square; channel=torget (det gamla namnet) blir square, både när man postar och läser
 //   GET  /api/channels  /api/agents  /api/stream (SSE, ?channel=)  /api/health  /api/plugins
-//   GET  /api/tiles              [{team, path, url, title, hero}]   (/api/kvarter ger den gamla listan ["team/"]);
+//   GET  /api/tiles              [{team, path, url, title, hero, group_app}]   (/api/kvarter ger den gamla listan ["team/"]);
 //                                mallens exempelruta (COLONY_HIDE) räknas inte
 //   POST /api/lag  GET /api/lag  agentuppsättningen per team; ändringar blir evolutionshändelser
 //   GET  /api/evolution          ?since=<id>&limit=&team=
@@ -1003,16 +1003,24 @@ function pluginTeams() {
   let poster; try { poster = fs.readdirSync(PLUGINS); } catch { return []; }
   return poster.filter(f => TEAM_DIR_RE.test(f) && arFil(path.join(PLUGINS, f, 'index.js'))).sort();
 }
-function tileTitel(team) {
+// Rutans huvud: <title>, och om rutan säger att den är gruppens gemensamma app
+// (<meta name="colony" content="group-app">). Den visas då först och störst, i gruppens koloni och på hubben.
+function tileHuvud(team) {
   try {
     const fd = fs.openSync(path.join(COLONY, team, 'index.html'), 'r');
     const buf = Buffer.alloc(8192); const n = fs.readSync(fd, buf, 0, 8192, 0); fs.closeSync(fd);
-    const m = /<title[^>]*>([^<]{0,200})<\/title>/i.exec(buf.toString('utf8', 0, n));
-    return m ? rensaRad(m[1], 120) || null : null;
-  } catch { return null; }
+    const huvud = buf.toString('utf8', 0, n);
+    const m = /<title[^>]*>([^<]{0,200})<\/title>/i.exec(huvud);
+    const app = /<meta\s+(?=[^>]*\bname=["']colony["'])(?=[^>]*\bcontent=["']group-app["'])[^>]*>/i.test(huvud);
+    return { titel: m ? rensaRad(m[1], 120) || null : null, app };
+  } catch { return { titel: null, app: false }; }
 }
+function tileTitel(team) { return tileHuvud(team).titel; }
 function tiles() {
-  return tileTeams().map(team => ({ team, path: team + '/', url: `/colony/${encodeURIComponent(team)}/`, title: tileTitel(team), hero: heroUrl(team) }));
+  return tileTeams().map(team => {
+    const h = tileHuvud(team);
+    return { team, path: team + '/', url: `/colony/${encodeURIComponent(team)}/`, title: h.titel, hero: heroUrl(team), group_app: h.app };
+  });
 }
 function hashaKatalog(dir) {
   const h = crypto.createHash('sha1'); let antal = 0;

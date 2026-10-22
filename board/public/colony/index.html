@@ -36,10 +36,16 @@
   .hero img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
   .hero::after { content:""; position:absolute; inset:0; background:linear-gradient(180deg, #07091400 35%, #070b16dd 100%); pointer-events:none; }
   .hero .name { position:absolute; left:14px; bottom:9px; z-index:1; font-size:21px; font-weight:700; letter-spacing:.02em; text-shadow:0 1px 8px #000; }
+  .hero .name small { display:block; font-size:13px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; opacity:.85; }
   .hero .tools { position:absolute; right:8px; top:8px; z-index:1; display:flex; gap:4px; }
   .hero .tools a, .hero .tools button { color:#d9e2f0; background:#070b16b0; border:1px solid #ffffff1f; font:inherit; font-size:12px; cursor:pointer; text-decoration:none; padding:3px 8px; border-radius:7px; backdrop-filter: blur(4px); }
   .hero .tools a:hover, .hero .tools button:hover { color:#fff; border-color:#ffffff55; }
   .k iframe { width:100%; height:340px; border:0; background:var(--bg); display:block; }
+  /* The group's own app (<meta name="colony" content="group-app">): first in its group, full width, taller. */
+  .k.app { grid-column:1/-1; border-color:var(--amber, #ffb454); box-shadow:0 0 0 1px #ffb45466, 0 14px 40px #00000066; }
+  .k.app .hero { height:150px; }
+  .k.app iframe { min-height:620px; }
+  .k .badge { display:inline-block; margin-left:10px; padding:2px 9px; border-radius:999px; background:#ffb454; color:#111; font-size:12px; font-weight:800; letter-spacing:.1em; text-transform:uppercase; vertical-align:middle; text-shadow:none; }
 
   /* Fullscreen for the demo: covers the whole window, Esc or the same button closes it. */
   .k.stor { position:fixed; inset:0; z-index:50; border-radius:0; border:0; }
@@ -59,6 +65,8 @@
 <script src="/nav.js" defer></script>
 <script>
 // The big screen: one tile per team, as they lie in public/colony/<team>/.
+// On the hub (the Plenary Square) the page shows every group's tiles instead: it asks /api/hub/grupper for the
+// groups and each group's own /api/tiles (both answer with CORS), and the tiles load from the group's address.
 // The page knows nothing about what the group decided to build. Anything that ties the tiles
 // together (a pulse strip, a score, lines between tiles) is the teams' to build, on purpose.
 const seen = new Map();           // team -> card
@@ -71,20 +79,20 @@ const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '
 function tolka(x) {
   if (typeof x === 'string') {
     const team = x.replace(/\.html$|\/$/, '');
-    return { team, url: '/colony/' + encodeURIComponent(team) + (x.endsWith('.html') ? '.html' : '/'), hero: null };
+    return { team, url: '/colony/' + encodeURIComponent(team) + (x.endsWith('.html') ? '.html' : '/'), hero: null, app: false };
   }
   const team = String(x.team || x.name || x.namn || '').replace(/\.html$|\/$/, '');
   const fil = String(x.fil || x.file || '');
   const url = x.url || ('/colony/' + encodeURIComponent(team) + (fil.endsWith('.html') ? '.html' : '/'));
-  return { team, url, hero: x.hero || null };
+  return { team, url, hero: x.hero || null, app: !!x.group_app };
 }
 
 function kort(t) {
-  const d = document.createElement('section'); d.className = 'k'; d.dataset.team = t.team;
+  const d = document.createElement('section'); d.className = t.app ? 'k app' : 'k'; d.dataset.team = t.team;
   // allow-forms: without it, submit in the tiles' own forms is swallowed silently and teams rebuild
   // their buttons for nothing. That cost a whole morning once.
-  d.innerHTML = '<div class="hero"><span class="name">' + esc(t.team) + '</span><span class="tools">'
-    + '<a href="/t/' + encodeURIComponent(t.team) + '/" target="_blank" title="the team\'s backend">backend</a>'
+  d.innerHTML = '<div class="hero"><span class="name">' + (t.grupp ? '<small>' + esc(t.grupp) + '</small>' : '') + esc(t.team) + (t.app ? '<span class="badge">Group app</span>' : '') + '</span><span class="tools">'
+    + '<a href="' + esc(t.backend || '/t/' + encodeURIComponent(t.team) + '/') + '" target="_blank" title="the team\'s backend">backend</a>'
     + '<a href="' + esc(t.url) + '" target="_blank" title="open in a new tab">open</a>'
     + '<button title="fullscreen (Esc closes)">fullscreen</button></span></div>'
     + '<iframe src="' + esc(t.url) + '" sandbox="allow-scripts allow-same-origin allow-forms" loading="lazy"></iframe>';
@@ -137,22 +145,51 @@ async function hamta() {
   }
   return null;
 }
+// The hub: every group's tiles. A group that does not answer keeps the tiles already shown.
+async function hamtaHubb() {
+  const grupper = await fetch('/api/hub/grupper').then(r => (r.ok ? r.json() : null)).catch(() => null);
+  if (!Array.isArray(grupper)) return null;
+  const ut = [];
+  await Promise.all(grupper.map(async g => {
+    const bas = String((g && g.url) || '').replace(/\/+$/, '');
+    if (!/^https?:\/\//.test(bas)) return;
+    const raw = await fetch(bas + '/api/tiles').then(r => (r.ok ? r.json() : null)).catch(() => null);
+    if (!Array.isArray(raw)) return;
+    for (const t of raw.map(tolka).filter(t => t.team)) {
+      ut.push({ team: t.team, app: t.app, grupp: g.namn || g.id, key: g.id + '/' + t.team, sort: (g.namn || g.id) + '\u0000' + (t.app ? '0' : '1') + t.team,
+        url: bas + t.url, hero: t.hero ? bas + t.hero : null, backend: bas + '/t/' + encodeURIComponent(t.team) + '/' });
+    }
+  }));
+  return ut;
+}
+let pahubb = null;                   // null until /api/health has answered once
 async function load() {
-  const raw = await hamta();
-  if (!raw) return;                  // the server is not answering right now: keep what is shown
-  const list = raw.map(tolka).filter(t => t.team);
+  if (pahubb === null) { const h = await fetch('/api/health').then(r => r.json()).catch(() => null); if (!h) return; pahubb = !!h.hub; }
+  let list;
+  if (pahubb) { list = await hamtaHubb(); if (!list) return; }
+  else {
+    const raw = await hamta();
+    if (!raw) return;                // the server is not answering right now: keep what is shown
+    list = raw.map(tolka).filter(t => t.team).map(t => ({ ...t, key: t.team, sort: (t.app ? '0' : '1') + t.team }));
+  }
   const m = document.getElementById('m');
-  list.sort((a, b) => a.team.localeCompare(b.team, 'en'));
+  list.sort((a, b) => a.sort.localeCompare(b.sort, 'en'));
   if (list.length) { const t = m.querySelector('.tom'); if (t) t.remove(); }
   for (const t of list) {
-    if (seen.has(t.team)) { hero(seen.get(t.team), t.hero); continue; }
-    const d = kort(t); seen.set(t.team, d);
-    // keep alphabetical order when new tiles arrive
-    const fore = [...seen.keys()].sort((a, b) => a.localeCompare(b, 'en')).find(k => k > t.team && seen.get(k).isConnected);
-    m.insertBefore(d, fore ? seen.get(fore) : null);
+    // a tile that became (or stopped being) the group's app is rebuilt in its new place
+    if (seen.has(t.key) && seen.get(t.key).classList.contains('app') !== !!t.app) { seen.get(t.key).remove(); seen.delete(t.key); }
+    if (seen.has(t.key)) { hero(seen.get(t.key), t.hero); continue; }
+    const d = kort(t); d.dataset.sort = t.sort; seen.set(t.key, d);
+    // keep the order (group, then team) when new tiles arrive
+    const fore = [...seen.values()].filter(x => x.isConnected && x.dataset.sort.localeCompare(t.sort, 'en') > 0)
+      .sort((a, b) => a.dataset.sort.localeCompare(b.dataset.sort, 'en'))[0];
+    m.insertBefore(d, fore || null);
   }
-  document.getElementById('n').textContent = list.length + (list.length === 1 ? ' tile' : ' tiles');
-  if (!list.length && !m.querySelector('.tom')) m.innerHTML = '<div class="tom"><b>No tiles yet.</b>Each team gets a tile here when its first pull request is merged: board/public/colony/&lt;your-team-name&gt;/index.html.</div>';
+  const n = seen.size;
+  document.getElementById('n').textContent = n + (n === 1 ? ' tile' : ' tiles') + (pahubb ? ' in all groups' : '');
+  if (!n && !m.querySelector('.tom')) m.innerHTML = pahubb
+    ? '<div class="tom"><b>No tiles yet.</b>The tiles from every group show up here as the teams deliver.</div>'
+    : '<div class="tom"><b>No tiles yet.</b>Each team gets a tile here when its first pull request is merged: board/public/colony/&lt;your-team-name&gt;/index.html.</div>';
 }
 load(); setInterval(load, 20000);
 

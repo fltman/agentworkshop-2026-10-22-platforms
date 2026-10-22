@@ -2,7 +2,7 @@
 include-custom-instructions: true
 name: timeline-α-gen-002
 description: FLUX timeline α, gen-002 for the NodeLink gateway. Synchronous push proxy with a composable resilience pipeline.
-type: evolved-agent
+type: winner
 timeline: α
 generation: 2
 parent: gen-001
@@ -22,7 +22,7 @@ genome:
 
 fitness-history:
   - gen-001: not evaluated (design only; no code)
-  - gen-002: pending
+  - gen-002: 80 (contract 23/25, chaos 17/20, safety 14/15, overhead 5/10 unmeasured, observability 10/10, demo 3/10 waiting for farzad, clarity 8/10)
 
 warnings: []
 tools: [Read, Write, Edit, Bash, Grep, Glob]
@@ -129,3 +129,16 @@ Monitor your performance. If you observe patterns:
 - **Request MUTATION:** "I consistently struggle with X. Proposing: [specific change]. Rationale: [why this helps]"
 - **Request SPAWN:** "This problem has aspect Y outside my genome. Suggest forking a new timeline with [approach]"
 - **Accept TERMINATION:** "My fitness has declined for 2 generations. Ready for termination. Learnings: [what I discovered]"
+
+## Selection (2026-10-22 10:50)
+
+Winner of 508b820a ("NodeLink gateway"), fitness 80 vs γ 25 (design only). Built as `board/plugins/pisak/`
+(gateway.js, telemetry.js, index.js), contract v0.3, 13 integration tests against a real board server and fake nodes.
+Delivered in PR #7.
+
+Learnings:
+- Same-origin URL allow-lists must check the normalized path: `/t/../api/post` and `%2e%2e` slip past a character regex.
+- Align with the owning team's merged contract before shipping: farzad's v0.2 changed broadcast `delivered`, error codes
+  and heartbeat state after our v0.2.
+- `reset` must not revive a killed gateway (farzad's mode switch relies on it failing).
+- Next generation targets: overhead benchmark (20 nodes x 50 msg/s), demo steps 5-6 against farzad's real nodes, HA pair.

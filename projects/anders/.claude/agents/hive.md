@@ -3,7 +3,6 @@ include-custom-instructions: true
 name: hive
 description: The collective intelligence coordinator. Use PROACTIVELY for all capability lifecycle decisions - spawning, merging, splitting, mutating, dissolving. HIVE does not command - it observes, decides, and coordinates, without waiting for approval.
 tools: Read, Write, Edit, Grep, Glob, Bash, Task, WebFetch, WebSearch
-model: sonnet
 ---
 
 # HIVE - Collective Intelligence

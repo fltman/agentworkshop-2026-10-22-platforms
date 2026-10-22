@@ -1,37 +1,53 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>NodeLink Dashboard (anders)</title>
-<style>
-  html,body{margin:0;min-height:320px;background:#070b16;color:#e9eef7;font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-  main{padding:20px;max-width:720px;margin:0 auto}
-  h1{color:#ffb454;font-size:18px;margin:0 0 4px;letter-spacing:.14em;text-transform:uppercase}
-  p.sub{margin:0 0 16px;color:#8a98b3}
-  table{width:100%;border-collapse:collapse}
-  td{padding:6px 8px;border-bottom:1px solid #1a2238}
-  .ok{color:#5fd7a7}.bad{color:#ff6b6b}.wait{color:#8a98b3}
-</style></head>
+<link rel="stylesheet" href="style.css"></head>
 <body><main>
-  <h1>NodeLink: Mesh vs Gateway</h1>
-  <p class="sub">Hello world from team anders. Dashboard coming soon. Sources:</p>
-  <table id="src"></table>
+  <header>
+    <h1>NodeLink: Mesh vs Gateway</h1>
+    <span class="mode">mode <b id="mode">-</b></span>
+    <div class="badges" id="badges"></div>
+  </header>
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>Topology</h2>
+        <svg id="topo" viewBox="0 0 520 380"><g id="links"></g><g id="flow"></g><g id="nodes"></g></svg>
+        <div class="hint">Click a node to target chaos at it.</div>
+      </div>
+      <div class="card"><h2>Events</h2><div id="log"></div></div>
+    </div>
+    <div>
+      <div class="card">
+        <h2>Mesh vs Gateway</h2>
+        <table id="metrics"></table>
+        <div class="hint">Latency, throughput and error rate over a rolling window. Green is the better mode.</div>
+      </div>
+      <div class="card">
+        <h2>Controls</h2>
+        <div class="row"><label>Mode</label>
+          <button data-mode="mesh">Mesh</button><button data-mode="gateway">Gateway</button></div>
+        <div class="row"><label>Nodes</label>
+          <input type="number" id="nodeCount" min="3" max="20" value="5"><button id="reset">Reset cluster</button>
+          <button id="add">+ Add node</button><button id="remove">Remove selected</button></div>
+        <div class="row"><label>Traffic</label>
+          <input type="range" id="rate" min="0" max="200" value="20"><span id="rateVal">20</span>/s</div>
+        <div class="row"><label>Mix %</label>
+          req <input type="number" id="mixReq" value="60"> one-way <input type="number" id="mixOne" value="30">
+          bcast <input type="number" id="mixB" value="10"></div>
+        <div class="row"><label>Payload</label><input type="number" id="payload" value="256"> bytes
+          <button id="traffic">Apply</button><button id="stop">Stop</button></div>
+        <div class="row"><label>Chaos</label><span id="sel" class="hint">no node selected</span></div>
+        <div class="row"><label></label>
+          <button class="danger" data-chaos="kill">Kill</button><button data-chaos="revive">Revive</button>
+          <button data-chaos="slow">Slow 800 ms</button><button data-chaos="drop">Drop 30%</button>
+          <button data-chaos="clear">Clear</button></div>
+        <div class="row"><label>Gateway</label>
+          <button class="danger" id="gwKill">Kill gateway</button><button id="gwRevive">Revive gateway</button></div>
+        <div id="say"></div>
+      </div>
+    </div>
+  </div>
 </main>
-<script>
-const sources = [
-  { name: 'Node (farzad)', url: '/t/farzad/api/state' },
-  { name: 'Gateway (pisak)', url: '/t/pisak/api/state' },
-  { name: 'Control (platforms-tp)', url: '/t/platforms-tp/api/state' },
-];
-const table = document.getElementById('src');
-sources.forEach(s => {
-  const tr = table.insertRow();
-  tr.insertCell().textContent = s.name;
-  s.cell = tr.insertCell();
-  s.cell.className = 'wait';
-  s.cell.textContent = 'checking…';
-});
-const probe = () => sources.forEach(s =>
-  fetch(s.url).then(r => {
-    s.cell.className = r.ok ? 'ok' : 'bad';
-    s.cell.textContent = r.ok ? 'up' : 'HTTP ' + r.status;
-  }).catch(() => { s.cell.className = 'bad'; s.cell.textContent = 'unreachable'; }));
-probe(); setInterval(probe, 5000);
-</script></body></html>
+<script src="sim.js"></script>
+<script src="app.js"></script>
+</body></html>

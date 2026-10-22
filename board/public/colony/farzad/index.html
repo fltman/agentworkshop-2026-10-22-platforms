@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>farzad: NodeLink nodes</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 16px; background: #0f1419; color: #dde; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  button { background: #253040; color: #dde; border: 1px solid #456; border-radius: 4px; padding: 4px 10px; cursor: pointer; }
+  .node { padding: 6px 10px; border-radius: 4px; background: #1d2a1d; border: 1px solid #3a6; }
+  .node.down { background: #2a1d1d; border-color: #a44; }
+  .node.restarting, .node.leaving { background: #2a281d; border-color: #aa4; }
+  table { border-collapse: collapse; margin-top: 8px; }
+  td, th { padding: 2px 10px; border-bottom: 1px solid #334; text-align: right; }
+  th:first-child, td:first-child { text-align: left; }
+  #err { color: #f88; }
+</style>
+</head>
+<body>
+<h1>farzad: Node module</h1>
+<div>Mode: <b id="mode">?</b>, links <span id="links">?</span></div>
+<div class="row">
+  <button data-act="mesh">Mesh mode</button>
+  <button data-act="gateway">Gateway mode</button>
+  <button data-act="reset">Reset (5 nodes)</button>
+  <button data-act="kill">Kill a node</button>
+  <button data-act="revive">Revive all</button>
+</div>
+<div class="row" id="nodes"></div>
+<table>
+  <thead><tr><th>metric</th><th>mesh</th><th>gateway</th></tr></thead>
+  <tbody id="metrics"></tbody>
+</table>
+<div id="err"></div>
+<script>
+const API = '/t/farzad/api';
+let last = null;
+const el = (id) => document.getElementById(id);
+function cell(tag, text, cls) { const e = document.createElement(tag); e.textContent = text; if (cls) e.className = cls; return e; }
+async function call(method, path, body) {
+  const r = await fetch(API + path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error((j.error && (j.error.code || j.error.message)) || r.status);
+  return j;
+}
+async function refresh() {
+  try {
+    const s = await call('GET', '/state');
+    last = s;
+    el('mode').textContent = s.mode;
+    el('links').textContent = `${s.openConnections} open of ${s.possibleLinks} possible`;
+    el('nodes').replaceChildren(...(s.nodes || []).map((n) => cell('span', `${n.nodeId} ${n.status}`, `node ${n.status}`)));
+    const m = s.metrics || {};
+    const rows = ['p50Ms', 'p95Ms', 'throughputPerSec', 'errorRate', 'detectMs', 'detectMsAvg'].map((k) => {
+      const tr = document.createElement('tr');
+      tr.append(cell('td', k), cell('td', String((m.mesh || {})[k] ?? '-')), cell('td', String((m.gateway || {})[k] ?? '-')));
+      return tr;
+    });
+    el('metrics').replaceChildren(...rows);
+    el('err').textContent = '';
+  } catch (e) { el('err').textContent = `state: ${e.message}`; }
+}
+document.querySelectorAll('button').forEach((b) => b.addEventListener('click', async () => {
+  const act = b.dataset.act;
+  try {
+    if (act === 'mesh' || act === 'gateway') await call('POST', '/mode', { mode: act });
+    else if (act === 'reset') await call('POST', '/reset', { nodes: 5, mode: 'mesh' });
+    else if (act === 'kill') {
+      const up = ((last && last.nodes) || []).filter((n) => n.status === 'up');
+      if (up.length) await call('POST', '/chaos', { action: 'kill', nodeId: up[up.length - 1].nodeId });
+    } else if (act === 'revive') {
+      for (const n of ((last && last.nodes) || []).filter((x) => x.status === 'down')) await call('POST', '/chaos', { action: 'revive', nodeId: n.nodeId });
+    }
+  } catch (e) { el('err').textContent = `${act}: ${e.message}`; }
+  refresh();
+}));
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

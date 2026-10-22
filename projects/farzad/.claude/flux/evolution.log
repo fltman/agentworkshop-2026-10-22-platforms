@@ -1,2 +1,6 @@
 # FLUX Evolution Log
 2026-10-22 10:08 EVOLVE: no active timelines, nothing to evolve (contract first, /explore Node module next)
+2026-10-22 10:29 EXPLORE: 1c2d592a "node module runtime" (2 timelines: α monolith, β layered; 2 not 3 to save cost, fitness = acceptance suite)
+2026-10-22 10:32 EVOLVE: 1c2d592a gen-001 mutated mid-flight (α, β both gained gateway-compat gene: accept kind node-down + admin reset, after pisak's real API landed)
+2026-10-22 10:46 CROSS: 1c2d592a α→β (MAX_NODES error code)
+2026-10-22 10:46 SELECT: 1c2d592a-β wins (23/23 tie with α; layered structure keeps contract changes local), α to the graveyard

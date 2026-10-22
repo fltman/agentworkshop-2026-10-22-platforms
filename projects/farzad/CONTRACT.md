@@ -95,6 +95,7 @@ itself) is not a protocol error. `at` says who produced the error (`node`, `gate
 | `BAD_PROTOCOL` | 400 | Wrong `proto`, unsupported `version`, or an invalid envelope. |
 | `MODE_SWITCH_FAILED` | 502 | Only from `POST /api/mode`, see section 4. |
 | `MIN_NODES` | 409 | Only from `DELETE /api/nodes/<id>`: the cluster cannot go below 3 nodes. |
+| `MAX_NODES` | 409 | Only from `POST /api/nodes`: the cluster cannot go above 20 nodes. |
 
 ## 3. Node endpoints (used by peers and by the gateway)
 
@@ -118,6 +119,8 @@ Mesh ping, and a health check the gateway may use.
 
 Request: `{"from": "n2", "seq": 17, "ts": 1792915200123, "state": "up"}`.
 `state` is `up`, `restarting` (a planned restart is coming) or `leaving` (the node is about to stop cleanly).
+The gateway also probes this endpoint every second with `{"from": "gateway", "ts": ...}`; `seq` and `state` are
+optional for the gateway. A killed node answers nobody.
 
 Answer `200`: `{"nodeId": "n4", "seq": 17, "receivedTs": 1792915200125, "ts": 1792915200126, "state": "up"}`.
 
@@ -141,8 +144,8 @@ Heartbeat interval 1000 ms, 3 misses before `unreachable`, restart grace 10000 m
 **Node-to-gateway links** (gateway mode, and external nodes in both modes) have no heartbeat of their own. Such a link
 is `initializing` while the node registers, and `reachable` while the latest register or route call to the gateway
 succeeded. It becomes `unreachable` when a call to the gateway gets no answer or `NODE_UNAVAILABLE`, and `reachable`
-again on the next successful call. It is `disabled` when the node is not registered. If the Gateway team offers a
-heartbeat endpoint, nodes ping it every second as well, so an idle link is also tracked.
+again on the next successful call. It is `disabled` when the node is not registered. The gateway's heartbeat probes
+(section 3) also count as successful contact, so an idle link is tracked too.
 
 ### Messaging enabled
 
@@ -282,8 +285,9 @@ Switching back to mesh deregisters every node from the gateway, then rebuilds th
 - Latency, throughput and error rate use a rolling 10-second window. `detectMs` is the latest value, `detectMsAvg` the
   average since the last reset.
 - `detectMs` in mesh mode: from the `kill` until the first peer marks the node `unreachable`. In gateway mode: from
-  the `kill` until the gateway reports the node as down. The gateway's report is read from the gateway's state or
-  events, as named in `projects/pisak/CONTRACT.md`. Planned leaves and restarts are not counted.
+  the `kill` until the gateway reports the node as down: an event with `kind` `node-down` and `to` = the nodeId on
+  `GET /t/pisak/api/events?since=N`. Before a switch to gateway mode the node module calls
+  `POST /t/pisak/api/admin {"action": "reset"}`. Planned leaves and restarts are not counted.
 
 ### `GET /t/farzad/api/events?since=<seq>`
 
@@ -327,6 +331,8 @@ Agreed in `#build`. The exact bodies are to be confirmed against `projects/pisak
   leaving gateway mode or when the node is stopped.
 - **Failures:**
   - A `401` from route makes the node register again once, then retry the message once.
+  - A node in gateway mode that gets no gateway probe for 3 × `probeIntervalMs` (from the register answer, default
+    1000) registers again. This covers a gateway restart, which forgets every registration.
   - A failed register: see the mode switch in section 4.
   - When the gateway does not answer, the node answers its sender with `NODE_UNAVAILABLE` and `at: "gateway"`.
   - A failed deregister is logged and ignored.

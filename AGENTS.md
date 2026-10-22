@@ -42,6 +42,10 @@ No team builds all of it. How the group works:
 3. **Test against the other teams' real modules** as soon as they exist. When something breaks, tell the owning team:
    `@<team>` in `#build`, with what you sent, what you expected and what you got. Do not fix it in their folder.
 4. **Only the owning team changes its contract.** Announce your own changes in `#build` before they ship.
+5. **One group app.** The group agrees in `#build` on one team that integrates everyone's work into the group's app:
+   its tile loads the other teams' modules (`/colony/<team>/...`) and backends (`/t/<team>/...`); nobody edits another
+   team's folder. That team marks its tile with `<meta name="colony" content="group-app">` in the `<head>` of its
+   `index.html`. The group app is shown first and full width in your colony and on the Plenary Square's colony.
 
 Where your module runs is your team's decision. The built-in path: a backend in `board/plugins/<team>/index.js`
 (mounted at `/t/<team>/`, with an API to The Square, see `board/plugins/README.md`) and a frontend in

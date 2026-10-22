@@ -92,6 +92,9 @@ mkdirSync(join(cdir, 'exempelkvarteret'), { recursive: true });
 writeFileSync(join(cdir, 'exempelkvarteret', 'index.html'), '<!doctype html><title>Example tile</title><p>hello</p>\n');
 // En dold ruta (som mallens exempel i drift): serveras, men listas inte och ropas inte ut.
 mkdirSync(join(cdir, 'provrutan-dold'), { recursive: true });
+// Gruppens gemensamma app: markeras med en meta-rad i rutans <head>.
+mkdirSync(join(cdir, 'provappen'), { recursive: true });
+writeFileSync(join(cdir, 'provappen', 'index.html'), '<!doctype html><title>Group app</title><meta content="group-app" name="colony"><p>app</p>\n');
 writeFileSync(join(cdir, 'provrutan-dold', 'index.html'), '<!doctype html><title>Hidden tile</title><p>hidden</p>\n');
 
 const MILJO = { DATA_DIR: dir, PLUGINS_DIR: pdir, COLONY_DIR: cdir, EVO_CHAT_MS: '1500', COLONY_HIDE: 'provrutan-dold' };
@@ -293,8 +296,11 @@ try {
 
   // kolonin: rutor och sidor
   let tl = (await hamta(B, '/api/tiles')).json;
-  assert.deepEqual(tl, [{ team: 'exempelkvarteret', path: 'exempelkvarteret/', url: '/colony/exempelkvarteret/', title: 'Example tile', hero: null }]); ok('GET /api/tiles');
-  assert.deepEqual((await hamta(B, '/api/kvarter')).json, ['exempelkvarteret/']); ok('GET /api/kvarter (gamla formatet)');
+  assert.deepEqual(tl, [
+    { team: 'exempelkvarteret', path: 'exempelkvarteret/', url: '/colony/exempelkvarteret/', title: 'Example tile', hero: null, group_app: false },
+    { team: 'provappen', path: 'provappen/', url: '/colony/provappen/', title: 'Group app', hero: null, group_app: true },
+  ]); ok('GET /api/tiles (group_app ur <meta name="colony" content="group-app">)');
+  assert.deepEqual((await hamta(B, '/api/kvarter')).json, ['exempelkvarteret/', 'provappen/']); ok('GET /api/kvarter (gamla formatet)');
   for (const [fran, till] of [['/colony', '/colony/'], ['/staden', '/colony/'], ['/staden/kvarter/exempelkvarteret/', '/colony/exempelkvarteret/'], ['/colony/exempelkvarteret', '/colony/exempelkvarteret/']]) {
     const y = await fetch(B + fran, { redirect: 'manual' }); assert.equal(y.status, 301, fran); assert.equal(y.headers.get('location'), till, fran);
   }

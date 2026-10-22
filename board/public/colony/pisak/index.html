@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>NodeLink Gateway (pisak)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  html,body{margin:0;min-height:320px;background:#0b1020;color:#e6ecf8;font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{padding:18px;max-width:860px;margin:0 auto}
+  h1{font-size:17px;margin:0;letter-spacing:.12em;text-transform:uppercase;color:#7cc4ff}
+  .sub{color:#8a98b3;margin:2px 0 14px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  .pill{padding:3px 10px;border-radius:999px;font-weight:600;background:#1a2238}
+  .up,.reachable,.closed{color:#5fd7a7}.down,.unreachable,.open{color:#ff6b6b}.slow,.restarting,.half-open,.leaving{color:#ffb454}
+  button{background:#1a2238;color:#e6ecf8;border:1px solid #2c3a5e;border-radius:6px;padding:4px 12px;cursor:pointer;font:inherit}
+  button:hover{border-color:#7cc4ff}
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px}
+  .m{background:#121a30;border-radius:8px;padding:8px 10px}
+  .m b{display:block;font-size:19px}.m span{color:#8a98b3;font-size:12px}
+  table{width:100%;border-collapse:collapse;margin-bottom:14px}
+  th{text-align:left;color:#8a98b3;font-weight:500;font-size:12px}
+  td,th{padding:5px 8px;border-bottom:1px solid #1a2238}
+  #log{font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;max-height:220px;overflow:auto;background:#070b16;border-radius:8px;padding:8px}
+  #log div.bad{color:#ff8c8c}
+  .muted{color:#8a98b3}
+</style></head>
+<body><main>
+  <h1>NodeLink Gateway</h1>
+  <p class="sub">Module B, team pisak. Registration, routing, auth, retries, circuit breaker, rate limit and probe-based failure detection.</p>
+  <div class="row">
+    <span>Gateway</span><span id="gw" class="pill">…</span>
+    <button id="kill">Kill gateway</button><button id="revive">Revive</button><button id="reset">Reset</button>
+    <span id="msg" class="muted"></span>
+  </div>
+  <div class="metrics" id="metrics"></div>
+  <table><thead><tr><th>Node</th><th>Apps</th><th>Status</th><th>Link</th><th>Circuit</th><th>p50 ms</th><th>Last seen</th></tr></thead>
+    <tbody id="nodes"></tbody></table>
+  <div id="log"></div>
+</main>
+<script>
+const API = '/t/pisak/api';
+const $ = id => document.getElementById(id);
+const el = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = String(text); if (cls) e.className = cls; return e; };
+const METRICS = [['p50Ms', 'p50 ms'], ['p95Ms', 'p95 ms'], ['throughputPerSec', 'msg/s'], ['errorRate', 'error rate'],
+  ['detectMs', 'detect ms'], ['routed', 'routed'], ['retries', 'retries'], ['rateLimited', 'rate limited']];
+let since = null;
+
+async function getJson(path) { const r = await fetch(API + path, { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }
+
+function renderState(s, m) {
+  const gw = $('gw'); gw.textContent = s.gateway.status; gw.className = 'pill ' + s.gateway.status;
+  const box = $('metrics'); box.replaceChildren();
+  for (const [k, label] of METRICS) {
+    let v = m[k]; if (k === 'errorRate') v = (v * 100).toFixed(1) + ' %'; if (v === null || v === undefined) v = '–';
+    const d = el('div', undefined, 'm'); d.append(el('b', v), el('span', label)); box.append(d);
+  }
+  const d = el('div', undefined, 'm'); d.append(el('b', s.openConnections + ' / ' + s.possibleLinks), el('span', 'links open')); box.append(d);
+  const tb = $('nodes'); tb.replaceChildren();
+  if (!s.nodes.length) { const tr = tb.insertRow(); const td = tr.insertCell(); td.colSpan = 7; td.className = 'muted'; td.textContent = 'No nodes registered. Nodes join when farzad switches to gateway mode.'; }
+  for (const n of s.nodes) {
+    const link = (s.links.find(l => l.from === n.nodeId) || {}).state || '';
+    const tr = tb.insertRow();
+    tr.append(el('td', n.nodeId + (n.external ? ' (ext)' : '')), el('td', n.apps.join(', ')), el('td', n.status, n.status),
+      el('td', link, link), el('td', n.circuit, n.circuit), el('td', n.p50Ms), el('td', Math.max(0, Math.round((Date.now() - n.lastSeen) / 100) / 10) + ' s ago'));
+  }
+}
+
+function describe(e) {
+  const t = new Date(e.ts).toLocaleTimeString();
+  const parts = [t, e.kind];
+  if (e.kind === 'message') parts.push(e.type, (e.from || '?') + ' → ' + (e.to || '?'), e.ok ? 'ok' : e.errorCode, e.latencyMs + ' ms');
+  else if (e.nodeId) parts.push(e.nodeId);
+  if (e.detectMs != null) parts.push('detect ' + e.detectMs + ' ms');
+  return parts.filter(x => x !== undefined && x !== null).join('  ');
+}
+
+async function pollEvents() {
+  const page = await getJson(since === null ? '/events?limit=30' : '/events?since=' + since);
+  since = page.seq;
+  const log = $('log');
+  for (const e of page.events) log.prepend(el('div', describe(e), e.ok === false ? 'bad' : ''));
+  while (log.childElementCount > 200) log.lastChild.remove();
+}
+
+async function tick() {
+  try {
+    const [s, m] = await Promise.all([getJson('/state'), getJson('/metrics')]);
+    renderState(s, m);
+    await pollEvents();
+  } catch (err) {
+    const gw = $('gw'); gw.textContent = 'unreachable'; gw.className = 'pill down';
+  }
+}
+
+async function admin(action) {
+  $('msg').textContent = action + '…';
+  try {
+    const r = await fetch(API + '/admin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) });
+    $('msg').textContent = r.ok ? action + ' done' : action + ' failed: HTTP ' + r.status;
+  } catch (err) { $('msg').textContent = action + ' failed'; }
+  tick();
+}
+$('kill').onclick = () => admin('kill');
+$('revive').onclick = () => admin('revive');
+$('reset').onclick = () => admin('reset');
+tick(); setInterval(tick, 1000);
+</script></body></html>

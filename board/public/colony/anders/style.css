@@ -1,0 +1,31 @@
+html,body{margin:0;min-height:320px;background:#070b16;color:#e9eef7;font:14px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{padding:16px;max-width:1200px;margin:0 auto}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:12px;margin-bottom:12px}
+h1{color:#ffb454;font-size:18px;margin:0;letter-spacing:.14em;text-transform:uppercase}
+h2{color:#8a98b3;font-size:12px;margin:0 0 8px;letter-spacing:.12em;text-transform:uppercase}
+.badges{display:flex;gap:6px;flex-wrap:wrap}
+.badge{padding:2px 8px;border-radius:10px;background:#141c30;font-size:12px;color:#8a98b3}
+.badge.live{color:#5fd7a7}.badge.down{color:#ff6b6b}.badge.demo{background:#3a2a10;color:#ffb454;font-weight:600}
+.grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px}
+@media (max-width:900px){.grid{grid-template-columns:1fr}}
+.card{background:#0c1324;border:1px solid #1a2238;border-radius:8px;padding:12px;margin-bottom:14px}
+svg{width:100%;height:auto;display:block}
+.mode{font-size:13px;color:#8a98b3}.mode b{color:#e9eef7}
+table{width:100%;border-collapse:collapse}
+th,td{padding:5px 8px;border-bottom:1px solid #1a2238;text-align:right}
+th:first-child,td:first-child{text-align:left;color:#8a98b3}
+th.active{color:#ffb454}
+td.win{color:#5fd7a7;font-weight:600}
+.row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0}
+.row label{color:#8a98b3;min-width:64px}
+button{background:#18223a;color:#e9eef7;border:1px solid #2a3654;border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit}
+button:hover{border-color:#ffb454}
+button.on{background:#ffb454;color:#070b16;border-color:#ffb454}
+button.danger{border-color:#7a2f3a}
+input[type=number]{width:56px;background:#070b16;color:#e9eef7;border:1px solid #2a3654;border-radius:4px;padding:3px}
+input[type=range]{width:140px}
+#say{min-height:1.4em;color:#8a98b3;font-size:12px}
+#say.err{color:#ff6b6b}
+#log{font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;max-height:180px;overflow:auto;color:#b7c2d8}
+#log .bad{color:#ff6b6b}#log .good{color:#5fd7a7}
+.hint{color:#5d6a85;font-size:12px}
